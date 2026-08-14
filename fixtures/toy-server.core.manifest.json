@@ -1,0 +1,115 @@
+{
+  "pointer_width": 8,
+  "pid": 4242,
+  "process_name": "toy-server",
+  "command_line": "./toy-server --listen :8080 --workers 4",
+  "exec_path": "/opt/app/toy-server",
+  "heap_base": 139637976727552,
+  "heap_end": 139637976743936,
+  "arenas": [
+    {
+      "addr": 140368121171968,
+      "size": 16384,
+      "top": 139637976727824,
+      "is_main": true
+    }
+  ],
+  "objects": [
+    {
+      "addr": 139637976727568,
+      "size": 32,
+      "state": "allocated",
+      "arena": 140368121171968,
+      "chunk_header": 139637976727552,
+      "label": "head"
+    },
+    {
+      "addr": 139637976727616,
+      "size": 32,
+      "state": "allocated",
+      "arena": 140368121171968,
+      "chunk_header": 139637976727600,
+      "label": "second"
+    },
+    {
+      "addr": 139637976727664,
+      "size": 32,
+      "state": "allocated",
+      "arena": 140368121171968,
+      "chunk_header": 139637976727648,
+      "label": "tail"
+    },
+    {
+      "addr": 139637976727712,
+      "size": 64,
+      "state": "allocated",
+      "arena": 140368121171968,
+      "chunk_header": 139637976727696,
+      "label": "payload"
+    },
+    {
+      "addr": 139637976727792,
+      "size": 32,
+      "state": "freed",
+      "arena": 140368121171968,
+      "chunk_header": 139637976727776,
+      "label": "freed_slot"
+    }
+  ],
+  "roots": [
+    {
+      "addr": 140733193404368,
+      "value": 139637976727568,
+      "kind": "stack",
+      "target_label": "head"
+    },
+    {
+      "addr": 14,
+      "value": 139637976727568,
+      "kind": "register",
+      "target_label": "head"
+    }
+  ],
+  "edges": [
+    {
+      "from_addr": 139637976727568,
+      "from_label": "head",
+      "offset": 0,
+      "to_addr": 139637976727616,
+      "to_label": "second",
+      "kind": "heap"
+    },
+    {
+      "from_addr": 139637976727616,
+      "from_label": "second",
+      "offset": 0,
+      "to_addr": 139637976727664,
+      "to_label": "tail",
+      "kind": "heap"
+    },
+    {
+      "from_addr": 139637976727664,
+      "from_label": "tail",
+      "offset": 0,
+      "to_addr": 139637976727568,
+      "to_label": "head",
+      "kind": "heap"
+    },
+    {
+      "from_addr": 139637976727712,
+      "from_label": "payload",
+      "offset": 0,
+      "to_addr": 139637976727568,
+      "to_label": "head",
+      "kind": "heap"
+    },
+    {
+      "from_addr": 139637976727712,
+      "from_label": "payload",
+      "offset": 8,
+      "to_addr": 140368121184384,
+      "to_label": null,
+      "kind": "rodata"
+    }
+  ]
+}

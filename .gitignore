@@ -1,0 +1,8 @@
+target/
+.DS_Store
+*.core
+!fixtures/*.core
+!fixtures/*.manifest.json
+spec.md
+scripts/real-src/test
+scripts/real-src/manyfree

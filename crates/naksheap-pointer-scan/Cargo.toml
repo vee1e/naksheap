@@ -1,0 +1,13 @@
+[package]
+name = "naksheap-pointer-scan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Pointer scanning of carved heap objects and roots into a reference edge set"
+
+[dependencies]
+naksheap-core-parse = { path = "../naksheap-core-parse" }
+naksheap-allocator-heuristics = { path = "../naksheap-allocator-heuristics" }
+rayon.workspace = true
+serde.workspace = true

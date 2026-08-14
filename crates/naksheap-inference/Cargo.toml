@@ -1,0 +1,17 @@
+[package]
+name = "naksheap-inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Object graph construction, repeated-layout clustering, struct field inference, container detection, confidence scoring, JSON export"
+
+[dependencies]
+naksheap-core-parse = { path = "../naksheap-core-parse" }
+naksheap-allocator-heuristics = { path = "../naksheap-allocator-heuristics" }
+naksheap-pointer-scan = { path = "../naksheap-pointer-scan" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+naksheap-testkit = { path = "../naksheap-testkit" }

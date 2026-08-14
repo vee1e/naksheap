@@ -1,0 +1,37 @@
+services:
+  naksheap:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: naksheap-server:latest
+    ports:
+      - "8080:8080"
+    environment:
+      NAKSHEAP_ARTIFACTS: /data
+      NAKSHEAP_MAX_UPLOAD_BYTES: "10737418240" # 10 GiB
+      NAKSHEAP_MAX_REPORTS: "1000"
+    volumes:
+      - naksheap-data:/data
+    # The analyzer NEVER initiates outbound connections by design (dump
+    # parsing is fully offline; the only external request is the optional
+    # cytoscape.js CDN fetch, made by the BROWSER, not this process). For hard
+    # egress isolation use the Kubernetes Job pattern + a NetworkPolicy, or
+    # run this behind a proxy that blocks outbound. `network_mode: none` is
+    # not usable here because the server must accept inbound uploads.
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "10001:10001"
+    deploy:
+      resources:
+        limits:
+          memory: 4Gi
+          cpus: "2"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/reports/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  naksheap-data:

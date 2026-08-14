@@ -1,0 +1,13 @@
+[package]
+name = "naksheap-core-parse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Core-dump / memory-image parsing: ELF core, minidump, memory maps, address space access"
+
+[dependencies]
+object.workspace = true
+memmap2.workspace = true
+thiserror.workspace = true
+serde.workspace = true

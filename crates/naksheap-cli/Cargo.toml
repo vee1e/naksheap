@@ -1,0 +1,25 @@
+[package]
+name = "naksheap-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "naksheap command-line interface: parse, carve, scan, infer, visualize"
+
+[[bin]]
+name = "naksheap"
+path = "src/main.rs"
+
+[dependencies]
+naksheap-core-parse = { path = "../naksheap-core-parse" }
+naksheap-allocator-heuristics = { path = "../naksheap-allocator-heuristics" }
+naksheap-pointer-scan = { path = "../naksheap-pointer-scan" }
+naksheap-inference = { path = "../naksheap-inference" }
+naksheap-viz = { path = "../naksheap-viz" }
+naksheap-testkit = { path = "../naksheap-testkit" }
+clap.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

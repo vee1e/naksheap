@@ -1,0 +1,11 @@
+[package]
+name = "naksheap-allocator-heuristics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Allocator-aware heap carving: glibc ptmalloc chunk walking, arena discovery, alloc/free state"
+
+[dependencies]
+naksheap-core-parse = { path = "../naksheap-core-parse" }
+serde.workspace = true

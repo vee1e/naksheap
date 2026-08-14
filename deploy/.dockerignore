@@ -1,0 +1,6 @@
+target/
+.git/
+*.core
+!fixtures/*.core
+!fixtures/*.manifest.json
+deploy/deploy/
