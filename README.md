@@ -18,16 +18,14 @@ naksheap reads the allocator metadata that is already in the dump. It walks glib
 
 The pipeline is one command, end to end.
 
-![naksheap pipeline](docs/pipeline.svg)
-
-<!-- Source (mermaid), regenerate with mermaid-cli:
+```mermaid
 flowchart LR
     A[core dump] --> B[find arenas and heap regions]
     B --> C[carve objects: address, size, allocated or freed]
     C --> D[scan for pointers between objects, registers, stack]
     D --> E[group identical layouts, detect vtables, strings, vectors]
     E --> F[object graph: ASCII, JSON, Graphviz, HTML report]
--->
+```
 
 ## Quick start
 
