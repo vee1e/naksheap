@@ -244,8 +244,7 @@ fn reports_progress_through_all_stages() {
     let events = seen.lock().expect("collector lock");
     assert!(!events.is_empty(), "progress callback was never invoked");
 
-    let stages: std::collections::HashSet<&str> =
-        events.iter().map(|(s, _)| s.as_str()).collect();
+    let stages: std::collections::HashSet<&str> = events.iter().map(|(s, _)| s.as_str()).collect();
     for want in ["parse", "carve", "scan", "infer", "serialize"] {
         assert!(
             stages.contains(want),
@@ -278,10 +277,8 @@ fn throttles_progress_on_a_large_dump() {
     let mut spec = CoreSpec::default();
     for i in 0..n {
         let next = (i + 1) % n;
-        let o = naksheap_testkit::SpecObject::new(format!("bulk{i}"), 0x40).ptr(
-            0,
-            format!("bulk{next}"),
-        );
+        let o = naksheap_testkit::SpecObject::new(format!("bulk{i}"), 0x40)
+            .ptr(0, format!("bulk{next}"));
         spec.objects.push(o);
     }
     // The spec's default heap segment is sized for five objects; growing the

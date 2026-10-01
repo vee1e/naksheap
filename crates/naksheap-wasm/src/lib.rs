@@ -315,8 +315,8 @@ pub fn analyze_with(
         "edges": scan.edges.len(),
         "roots": scan.roots.len(),
     });
-    let maps = serde_json::to_value(parsed.map.iter().collect::<Vec<_>>())
-        .unwrap_or_else(|_| json!([]));
+    let maps =
+        serde_json::to_value(parsed.map.iter().collect::<Vec<_>>()).unwrap_or_else(|_| json!([]));
     tracker.advance(1, 1);
 
     Ok(Analysis {
@@ -357,8 +357,8 @@ pub fn analyze_js(
     on_progress: Option<js_sys::Function>,
 ) -> std::result::Result<String, JsValue> {
     let sink = JsProgress { on_progress };
-    let analysis = analyze_with(bytes, &ScanOptions::default(), &sink)
-        .map_err(|e| JsValue::from_str(&e.0))?;
+    let analysis =
+        analyze_with(bytes, &ScanOptions::default(), &sink).map_err(|e| JsValue::from_str(&e.0))?;
 
     let out = json!({
         "graph": analysis.graph,

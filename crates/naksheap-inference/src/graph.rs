@@ -599,31 +599,27 @@ fn infer_type(
         let fields = fields_from_cluster(image, obj, c);
         let n = c.members.len();
         let mut evidence = Vec::new();
-        let mut base_conf;
-        let name;
-        if n >= 3 {
-            base_conf = 0.6 + 0.06 * (n.min(5) as f64);
-            base_conf = base_conf.min(0.95);
+        let (base_conf, name) = if n >= 3 {
+            let conf = (0.6 + 0.06 * (n.min(5) as f64)).min(0.95);
             evidence.push(format!(
                 "{} members share identical layout (size=0x{:x})",
                 n, obj.size
             ));
-            name = "probable struct".to_string();
+            (conf, "probable struct".to_string())
         } else if n == 2 {
-            base_conf = 0.5;
             evidence.push(format!(
                 "2 instances share identical layout (size=0x{:x})",
                 obj.size
             ));
-            name = "probable struct".to_string();
+            (0.5, "probable struct".to_string())
         } else {
-            base_conf = 0.3;
+            let conf = 0.3;
             evidence.push(format!(
-                "unique layout (size=0x{:x}), no repeated instances",
+                "1 instance of this layout (size=0x{:x})",
                 obj.size
             ));
-            name = "opaque buffer".to_string();
-        }
+            (conf, "opaque buffer".to_string())
+        };
         append_refs(&mut evidence, inbound, outbound);
 
         let vtable_hit = fields.iter().any(|f| f.kind == FieldKind::Vtable);

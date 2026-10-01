@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: build and test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The repository was not rustfmt-formatted before the wasm work, so a
+      # workspace-wide --check would fail on untouched files. This gates only
+      # the code added since, which is what future changes must keep clean.
+      - name: Format (new crates)
+        run: |
+          cargo fmt --check -p naksheap-wasm || {
+            echo "::error::naksheap-wasm is not rustfmt-clean"
+            exit 1
+          }
+
+      - name: Test
+        run: cargo test --workspace -- --nocapture
+
+      - name: Build release
+        run: cargo build --release -p naksheap-cli
+
+      - name: Self-test on the checked-in fixture
+        run: ./target/release/naksheap self-test
+
+  wasm:
+    name: wasm build and browser tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      # The wasm-bindgen CLI must match the wasm-bindgen crate version exactly;
+      # the schema is unstable between releases, so this reads the version the
+      # lockfile resolved rather than pinning a second number by hand.
+      - name: Install wasm-bindgen-cli at the locked version
+        run: |
+          version=$(cargo tree -p naksheap-wasm -i wasm-bindgen --depth 0 \
+            | sed -n 's/.*wasm-bindgen v\(.*\)/\1/p' | head -1)
+          echo "installing wasm-bindgen-cli $version"
+          cargo install wasm-bindgen-cli --version "$version" --locked
+
+      # These run in real headless Chrome via chromedriver, which is what
+      # GitHub's ubuntu-latest image already provides. They assert the wasm
+      # build against the testkit ground-truth manifest, so a regression in the
+      # browser build is caught here rather than by a user.
+      - name: Browser integration tests
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: cargo test -p naksheap-wasm --target wasm32-unknown-unknown
+
+      - name: Build the wasm release module
+        run: cargo build --release -p naksheap-wasm --target wasm32-unknown-unknown
+
+  web:
+    name: build web ui
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: web
+
+      - name: Install wasm-bindgen-cli at the locked version
+        run: |
+          version=$(cargo tree -p naksheap-wasm -i wasm-bindgen --depth 0 \
+            | sed -n 's/.*wasm-bindgen v\(.*\)/\1/p' | head -1)
+          cargo install wasm-bindgen-cli --version "$version" --locked
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: web
+        run: npm run check
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
+      - name: Verify dist
+        run: |
+          test -d web/dist
+          test -f web/dist/index.html
+          # The report and the analyzer must ship as real artifacts: a missing
+          # wasm file produces a page that loads and then does nothing.
+          ls web/dist/assets/*.wasm
+          test -f web/dist/sample.core
