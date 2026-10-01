@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Visualization: ASCII tree, Graphviz dot, HTML/cytoscape viewer (graph JSON embedded, cytoscape.js from CDN)"
+description = "Visualization: ASCII tree, Graphviz dot, and a self-contained HTML report (graph JSON embedded, inline renderer, no external resources)"
 
 [dependencies]
 naksheap-inference = { path = "../naksheap-inference" }

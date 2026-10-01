@@ -3,7 +3,10 @@ FROM rust:1.95 AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release --workspace --locked
+# Only the CLI is needed to serve requests. Building the whole workspace would
+# also pull in the wasm crate and its js-sys/wasm-bindgen dependencies, which
+# are of no use in a native image.
+RUN cargo build --release -p naksheap-cli --locked
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends python3 \

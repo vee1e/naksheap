@@ -2,9 +2,41 @@
 
 This guide explains how to run naksheap as a web service. People upload a core dump, the service reconstructs the heap, and a browser gets an interactive report plus the machine-readable graph.
 
-Privacy comes first. Core dumps contain credentials and keys. The reference stack is self-hosted and offline. The analyzer never sends data anywhere, and the only network request in the whole system is the optional cytoscape.js download in the HTML report, made by the browser, not the server.
+Privacy comes first. Core dumps contain credentials and keys. The analyzer never sends data anywhere, and the HTML report is a single self-contained file with no external scripts, fonts, or stylesheets, so opening a report makes no network request either.
 
-## What you are deploying
+There are two ways to run this. The in-browser build is the default and the safer one: it runs the analyzer as WebAssembly inside the page, so the dump never leaves the machine at all. The service described below is the alternative, for dumps too large for a browser and for CI.
+
+## In-browser build (no upload)
+
+`crates/naksheap-wasm` compiles the analysis pipeline to `wasm32-unknown-unknown`. The page loads the module, reads the dump from a file input, and analyzes it in a Web Worker. The bytes are never uploaded and never written to disk.
+
+```bash
+cargo build --release -p naksheap-wasm --target wasm32-unknown-unknown
+wasm-bindgen --target web --out-dir web/pkg \
+    target/wasm32-unknown-unknown/release/naksheap_wasm.wasm
+```
+
+The crate depends only on the five analysis libraries, not on `naksheap-cli`, so nothing pulls in `std::fs`, `std::process`, or `clap`. It uses the in-memory parse path (`parse_elf_bytes` + `MappedImage::from_bytes`) that `naksheap self-test` already exercises; `naksheap_core_parse::open`, the only entry point that needs a filesystem, is never called.
+
+`analyze_js(bytes, on_progress)` returns the graph as JSON and calls `on_progress` with `{ stage, done, total, fraction }` as the pipeline advances. The frontend runs it in a worker so a long analysis does not freeze the tab.
+
+### Size ceiling
+
+A `wasm32` guest can address at most 4 GiB of linear memory, and the pipeline needs roughly 5-6x the input size to work, plus a similar multiple again to serialize the result. Measured on synthetic ground-truth fixtures, a 8.8 MiB dump peaked near 60 MiB of linear memory and produced a 20 MiB JSON payload.
+
+That puts the practical in-browser ceiling at a few hundred MiB, far below what the native CLI or the service can take. `MAX_INPUT_BYTES` in the crate is set to 256 MiB as a guard. For larger dumps, use the service.
+
+### Performance
+
+`rayon` falls back to a single thread on `wasm32-unknown-unknown`, so the pointer scan runs on one core. A 32k-object dump takes about 2 seconds. Progress is reported roughly 200 times across the scan, throttled so the UI does not become the bottleneck.
+
+### Deferred: WebAssembly threads
+
+`wasm-bindgen-rayon` would let the scan use every core, likely a 4-8x speedup on large dumps. It is deliberately not enabled: it needs a nightly toolchain, `-C target-feature=+atomics`, `build-std`, and `SharedArrayBuffer`, which in turn requires the page to send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. That rules out serving the frontend from a third-party CDN and complicates every embedding. Correctness and a single-threaded build that works everywhere is the better trade until the size ceiling actually bites.
+
+## Service deployment
+
+### What you are deploying
 
 naksheap is a Rust command line tool. There is no web server built in. The service is a thin wrapper that accepts an uploaded dump, runs the CLI, stores the results, and serves them over HTTP.
 
@@ -67,7 +99,7 @@ The JSON contract is stable, so alerts can key off the edge counts or the number
 
 ## Air-gapped networks
 
-The HTML report loads cytoscape.js from a CDN. For an offline network, download the bundle once, serve it next to the reports, and change the script tag in the HTML to a local path. Everything else in the report is already embedded.
+Nothing needs fixing. The report is a single file with no external references, so it works on an isolated network, from a `file://` path, or attached to an incident ticket. The in-browser build also needs no network access after the page and the `.wasm` module have loaded once.
 
 ## Operations
 

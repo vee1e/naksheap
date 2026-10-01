@@ -1,0 +1,9 @@
+{
+  "//": "Capabilities for wasm-bindgen-test-runner. `binary` is deliberately absent: chromedriver resolves Chrome from the standard locations, or set CHROME_BIN. Add --no-sandbox here only if you run tests as root in a container, which is the usual CI case.",
+  "goog:chromeOptions": {
+    "args": [
+      "--disable-dev-shm-usage",
+      "--disable-gpu"
+    ]
+  }
+}

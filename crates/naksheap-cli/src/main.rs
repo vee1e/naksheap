@@ -34,7 +34,7 @@ enum Command {
         #[arg(long)]
         dot: bool,
         /// Write an HTML report (--out/report.html; embeds the graph JSON,
-        /// loads cytoscape.js from a CDN).
+        /// renderer embedded; no external resources).
         #[arg(long)]
         html: bool,
         /// Emit graph JSON (stdout, or --out/graph.json).

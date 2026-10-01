@@ -1,8 +1,8 @@
 //! naksheap-viz
 //!
 //! Visualization of the naksheap object graph: a root-anchored ASCII tree,
-//! Graphviz DOT, and an HTML/cytoscape report (graph JSON embedded, cytoscape.js
-//! loaded from a CDN).
+//! Graphviz DOT, and a self-contained HTML report (graph JSON embedded, inline
+//! canvas renderer, no external scripts, fonts, or stylesheets).
 
 pub mod ascii;
 pub mod dot;
@@ -113,7 +113,6 @@ mod tests {
     fn html_contains_embedded_json() {
         let (graph, fixture) = fixture_graph();
         let html = to_html(&graph);
-        assert!(html.contains("cytoscape"), "html: {html}");
         assert!(html.contains("stats"), "html: {html}");
         assert!(
             html.contains(&format!("0x{:x}", fixture.manifest.objects[0].addr)),
@@ -128,5 +127,35 @@ mod tests {
             !data.contains("</"),
             "embedded JSON contains an unescaped </ (would close the script tag)"
         );
+    }
+
+    /// The report must be self-contained: it used to fetch cytoscape.js from a
+    /// CDN at view time, which broke the offline guarantee in the README and
+    /// meant opening a report of a credential-bearing dump caused an outbound
+    /// request. Nothing in the output may reference an external resource.
+    #[test]
+    fn html_is_self_contained() {
+        let (graph, _) = fixture_graph();
+        let html = to_html(&graph);
+        for needle in ["http://", "https://", "<script src", "cdn", "unpkg"] {
+            assert!(
+                !html.contains(needle),
+                "report references {needle:?} and is no longer self-contained: {html}"
+            );
+        }
+    }
+
+    /// Both placeholders must actually be substituted. Substituting them in the
+    /// wrong order leaves a literal `__DATA__` in the script, which throws a
+    /// SyntaxError and leaves a blank page.
+    #[test]
+    fn html_substitutes_all_placeholders() {
+        let (graph, _) = fixture_graph();
+        let html = to_html(&graph);
+        assert!(!html.contains("__DATA__"), "unsubstituted data blob");
+        assert!(!html.contains("__JS__"), "unsubstituted renderer script");
+        // The renderer itself must be present, not just the template.
+        assert!(html.contains("requestAnimationFrame"), "renderer missing");
+        assert!(html.contains("getElementById('cv')"), "renderer not wired up");
     }
 }

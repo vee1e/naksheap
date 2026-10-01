@@ -3,6 +3,12 @@ target/
 *.core
 !fixtures/*.core
 !fixtures/*.manifest.json
+!web/public/*.core
 spec.md
 scripts/real-src/test
 scripts/real-src/manyfree
+
+# wasm build output for the web frontend
+web/pkg/
+web/node_modules/
+web/dist/

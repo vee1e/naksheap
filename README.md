@@ -107,7 +107,9 @@ Real core dumps come from `scripts/real-dump-test.sh`. It runs real C++ programs
 
 ## Privacy
 
-Analysis is fully offline. The only network request in the whole stack is the optional cytoscape.js download in the HTML report, made by the browser, not by the tool. Dumps can contain credentials and keys, so the reference web deployment is self-hosted and documented in `deployment.md`.
+Analysis is fully offline. The HTML report is a single self-contained file: the graph data and the renderer are both embedded, so opening a report makes no network request of any kind. There is no CDN, no external font, no analytics.
+
+Dumps can contain credentials and keys, so nothing is uploaded anywhere by default. The web build at `naksheap.lverma.com` runs the analyzer as WebAssembly inside your browser, which means the dump bytes never leave the machine. See `deployment.md` for the optional server-side service, which does receive the file.
 
 ## License
 

@@ -8,12 +8,30 @@ use crate::index::{index_objects, ObjectIndex};
 use crate::roots::scan_thread;
 use crate::{Edge, EdgeSource, Root, ScanOptions, ScanResult};
 
+/// Reports scan progress as `(objects_done, objects_total)`.
+pub type Progress<'a> = &'a (dyn Fn(usize, usize) + Sync);
+
 /// Full scan: object->object edges, plus stack/register roots and edges.
 pub fn scan(
     image: &(dyn AddressSpace + Sync),
     inventory: &HeapInventory,
     threads: &[ThreadContext],
     options: &ScanOptions,
+) -> ScanResult {
+    scan_with_progress(image, inventory, threads, options, &|_, _| {})
+}
+
+/// [`scan`], reporting object-scan progress via `progress`.
+///
+/// The callback is invoked as each object's scan completes, so a caller can
+/// drive a progress bar. It must be cheap and must not block: it runs inside
+/// rayon's worker pool.
+pub fn scan_with_progress(
+    image: &(dyn AddressSpace + Sync),
+    inventory: &HeapInventory,
+    threads: &[ThreadContext],
+    options: &ScanOptions,
+    progress: Progress<'_>,
 ) -> ScanResult {
     let index = index_objects(&inventory.objects);
     let alignment = options.alignment.max(1);
@@ -30,16 +48,28 @@ pub fn scan(
 
     let mut edges: Vec<Edge> = Vec::new();
     let mut strays: Vec<u64> = Vec::new();
+    // Object count is the progress denominator for the object scan; thread
+    // scans extend the same counter past it.
+    let total = inventory.objects.len();
 
     if options.scan_objects {
         // Each object collects its own strays into a Vec capped at
         // `per_object_cap`, so a single noisy object cannot flood memory. The
         // results are merged and filtered deterministically below.
         let per_object_cap = options.max_strays.max(1);
+        // `enumerate` gives a per-object completion index, so the callback
+        // advances the caller's progress bar during the scan instead of only
+        // reporting at the end. The callback runs on rayon worker threads, so
+        // it must be cheap and non-blocking.
         let chunks: Vec<(Vec<Edge>, Vec<u64>)> = inventory
             .objects
             .par_iter()
             .map(|o| scan_object(image, &index, o, options, alignment, per_object_cap))
+            .enumerate()
+            .map(|(i, v)| {
+                progress(i + 1, total);
+                v
+            })
             .collect();
         for (mut e, mut s) in chunks {
             edges.append(&mut e);
@@ -54,10 +84,13 @@ pub fn scan(
 
     let mut roots: Vec<Root> = Vec::new();
     if options.scan_registers || options.scan_stacks {
-        for thread in threads {
+        for (i, thread) in threads.iter().enumerate() {
             let (mut r, mut e) = scan_thread(image, thread, &index, options);
             roots.append(&mut r);
             edges.append(&mut e);
+            // Thread stacks are usually few and each is a long single scan, so
+            // report per thread rather than per word.
+            progress(total + i + 1, total + threads.len());
         }
     }
 

@@ -126,7 +126,14 @@ fn graph_dot_and_html_write_files() {
     let dot = std::fs::read_to_string(out_dir.join("graph.dot")).expect("read graph.dot");
     assert!(dot.starts_with("digraph"), "dot: {dot}");
     let html = std::fs::read_to_string(out_dir.join("report.html")).expect("read report.html");
-    assert!(html.contains("cytoscape"), "html: {html}");
+    // The report must be self-contained: no CDN fetch, no placeholders left
+    // unsubstituted, and the renderer actually present.
+    assert!(
+        !html.contains("https://") && !html.contains("http://"),
+        "report references an external resource: {html}"
+    );
+    assert!(!html.contains("__DATA__"), "unsubstituted data blob");
+    assert!(html.contains("requestAnimationFrame"), "renderer missing");
 }
 
 #[test]

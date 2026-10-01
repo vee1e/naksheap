@@ -1,0 +1,29 @@
+[package]
+name = "naksheap-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "WebAssembly bindings: analyze a core dump entirely in the browser, no upload, no filesystem"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+naksheap-core-parse = { path = "../naksheap-core-parse" }
+naksheap-allocator-heuristics = { path = "../naksheap-allocator-heuristics" }
+naksheap-pointer-scan = { path = "../naksheap-pointer-scan" }
+naksheap-inference = { path = "../naksheap-inference" }
+naksheap-viz = { path = "../naksheap-viz" }
+wasm-bindgen = "0.2"
+js-sys.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+naksheap-testkit = { path = "../naksheap-testkit" }
+naksheap-pointer-scan = { path = "../naksheap-pointer-scan" }
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Oz"]

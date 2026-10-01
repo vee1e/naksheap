@@ -1,0 +1,5 @@
+# wasm-bindgen-test-runner executes the compiled module in a real browser (or
+# node). Required: without this, `cargo test --target wasm32-unknown-unknown`
+# tries to exec the .wasm file directly and fails with "Exec format error".
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

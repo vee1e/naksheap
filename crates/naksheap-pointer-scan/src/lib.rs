@@ -34,7 +34,7 @@ mod scan;
 
 pub use index::{index_objects, ObjectIndex};
 pub use roots::collect_roots;
-pub use scan::scan;
+pub use scan::{scan, scan_with_progress};
 
 /// Where a root pointer candidate came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

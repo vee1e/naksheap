@@ -1,0 +1,58 @@
+:root {
+  /* Strict monochrome. The palette is deliberately two inks plus a scale of
+     greys, so nothing in the UI depends on colour to carry meaning. */
+  --ink: #0a0a0a;
+  --paper: #ffffff;
+  --grey-1: #f4f4f4;
+  --grey-2: #e4e4e4;
+  --grey-3: #b0b0b0;
+  --grey-4: #767676;
+  --grey-5: #3d3d3d;
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f2f2f2;
+    --paper: #0a0a0a;
+    --grey-1: #141414;
+    --grey-2: #242424;
+    --grey-3: #3a3a3a;
+    --grey-4: #8a8a8a;
+    --grey-5: #c4c4c4;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100%;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
