@@ -159,7 +159,7 @@
     <div class="graphctl">
       <button onclick={() => graphRef?.fitToView()}>fit</button>
       <button onclick={() => graphRef?.replay()}>replay layout</button>
-      <span class="dim">drag to pan, scroll to zoom, click a node</span>
+      <span class="hint">drag to pan, scroll to zoom, click a node</span>
     </div>
 
     <Table nodes={result.graph.nodes} selected={selectedAddr} onselect={select} />
@@ -214,6 +214,15 @@
   }
   .error p {
     margin: 0 0 10px;
+  }
+  .error button {
+    border-color: var(--grey-3);
+    color: var(--grey-5);
+  }
+  .error button:hover {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--paper);
   }
 
   .stats {
@@ -272,8 +281,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
     margin: 8px 0 20px;
     font-size: 11px;
+    color: var(--grey-4);
+  }
+  .graphctl .hint {
+    margin-left: auto;
   }
   .dim {
     color: var(--grey-4);

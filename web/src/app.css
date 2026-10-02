@@ -56,3 +56,67 @@ body {
   background: var(--ink);
   color: var(--paper);
 }
+
+/* Buttons -----------------------------------------------------------------
+ * These live in several components, so the base is global rather than scoped.
+ * Svelte scopes component styles, which means a `button { ... }` rule inside a
+ * component would only reach that component's own buttons. Without this the
+ * page shows the browser's default grey chrome, which reads as unfinished
+ * against the monochrome type.
+ */
+button {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* A quieter variant for the secondary action, so the primary one reads first
+ * without needing colour to do it. */
+button.ghost {
+  border-color: var(--grey-3);
+  color: var(--grey-5);
+}
+
+button.ghost:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  button.ghost {
+    transition: none;
+  }
+  button:active:not(:disabled) {
+    transform: none;
+  }
+}

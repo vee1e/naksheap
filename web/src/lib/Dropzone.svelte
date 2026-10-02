@@ -88,16 +88,17 @@
     font-size: 15px;
   }
   .sub {
-    margin: 0 0 16px;
+    margin: 0 auto 18px;
     color: var(--grey-4);
     font-size: 12px;
-    max-width: 46ch;
-    margin-inline: auto;
+    max-width: 52ch;
+    text-wrap: pretty;
   }
   .actions {
     display: flex;
     gap: 8px;
     justify-content: center;
+    flex-wrap: wrap;
   }
   .meta {
     margin: 14px 0 0;
