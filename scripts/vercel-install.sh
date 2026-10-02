@@ -14,6 +14,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# The Vercel build image sets HOME=/vercel but runs as root, so rustup sees
+# $HOME differing from the euid home and refuses to install. Point rustup at a
+# directory we own so it installs cleanly regardless of what HOME is.
+export RUSTUP_HOME="${RUSTUP_HOME:-/tmp/rustup}"
+export CARGO_HOME="${CARGO_HOME:-/tmp/cargo}"
+mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
+
 # Always install rustup and the pinned toolchain, even when a cargo is already
 # on PATH. Build images ship whatever rustc happened to be current: Vercel's
 # image carries 1.92, which is below this workspace's rust-version, and a
@@ -22,7 +29,11 @@ cd "$REPO_ROOT"
 # rust-toolchain.toml, so this selects the version the repo asks for.
 curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
 # shellcheck disable=SC1091
-. "$HOME/.cargo/env"
+. "$CARGO_HOME/env"
+
+# The build runs as one command, so the toolchain has to be on PATH for the
+# later npm/cargo steps in the same shell.
+export PATH="$CARGO_HOME/bin:$PATH"
 
 rustup show active-toolchain >/dev/null
 rustup target add wasm32-unknown-unknown
