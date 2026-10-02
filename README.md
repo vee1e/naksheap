@@ -105,11 +105,41 @@ Real core dumps come from `scripts/real-dump-test.sh`. It runs real C++ programs
 | Large bin lists | Unsorted, small, and large bins are not walked yet. Fastbin and tcache free lists are. |
 | No live debugging | This reads a static snapshot. It cannot groom a live heap or predict the next allocation. |
 
+## Web
+
+Two ways to run this in a browser, and they are not equivalent.
+
+**In the browser, nothing is uploaded.** `crates/naksheap-wasm` compiles the
+pipeline to WebAssembly. The page reads the dump from a file input, analyzes it
+in a Web Worker, and renders the graph. The bytes never leave the machine, and
+the page makes no third-party request of any kind.
+
+- Frontend: <https://naksheap.lverma.com>
+- Source: `web/`, deployed by Vercel from this repository on every push to
+  `main`.
+
+A `wasm32` guest can address 4 GiB of linear memory and the pipeline needs
+several times the input size, so the in-browser build caps uploads at 256 MiB
+and points at the service for anything larger. Larger dumps, and CI, use the
+service:
+
+- API: `naksheap-api.lverma.com`, `PUT /analyze` with the raw dump as the body.
+
+```bash
+curl -s -X PUT --data-binary @core.dump \
+     -H 'Content-Type: application/octet-stream' \
+     https://naksheap-api.lverma.com/analyze
+```
+
+The service keeps the report and the graph, then deletes the raw core. See
+`deployment.md` for the service configuration and `web/README.md` for the
+frontend build.
+
 ## Privacy
 
 Analysis is fully offline. The HTML report is a single self-contained file: the graph data and the renderer are both embedded, so opening a report makes no network request of any kind. There is no CDN, no external font, no analytics.
 
-Dumps can contain credentials and keys, so nothing is uploaded anywhere by default. The web build at `naksheap.lverma.com` runs the analyzer as WebAssembly inside your browser, which means the dump bytes never leave the machine. See `deployment.md` for the optional server-side service, which does receive the file.
+Dumps can contain credentials and keys, so the browser build is the default and the safer one: nothing is uploaded. The service at `naksheap-api.lverma.com` does receive the file, holds the report for 24 hours, and deletes the raw core as soon as the analysis finishes.
 
 ## License
 
