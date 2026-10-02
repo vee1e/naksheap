@@ -36,6 +36,34 @@ That puts the practical in-browser ceiling at a few hundred MiB, far below what 
 
 ## Service deployment
 
+### DNS
+
+The two halves resolve differently, and it is worth knowing why:
+
+| Host | Record | Why |
+|---|---|---|
+| `naksheap.lverma.com` | none needed | The frontend is a Vercel project, so Vercel's edge serves the name via SNI. Every other `*.lverma.com` Vercel frontend resolves to the same anycast addresses. |
+| `naksheap-api.lverma.com` | `A 103.127.146.28` | The API runs on the VPS behind Caddy, so it needs a real address. Caddy then obtains its own certificate automatically. |
+
+The zone for `lverma.com` is hosted on Vercel DNS (`ns1/ns2.vercel-dns.com`) even though the domain is registered at Namecheap: the registrar and the nameserver provider are separate, and the records live wherever the nameservers point.
+
+Creating the API record through the Vercel API requires the team that owns the zone, not the team that owns the frontend project:
+
+```bash
+# the project that owns the lverma.com apex is `pooort`
+TOKEN=...
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  'https://api.vercel.com/v2/domains/lverma.com/records?teamId=team_...' \
+  -d '{"type":"A","name":"naksheap-api","value":"103.127.146.28","ttl":60}'
+```
+
+Record changes on Vercel DNS are usually live within seconds, but a resolver that had already cached the previous, non-existent answer can hold a stale NXDOMAIN or the old placeholder address for the length of its negative-cache TTL. Confirm against the authoritative servers rather than your own resolver:
+
+```bash
+dig @ns1.vercel-dns.com naksheap-api.lverma.com +short   # authoritative
+dig @1.1.1.1 naksheap-api.lverma.com +short              # a public resolver
+```
+
 ### What you are deploying
 
 naksheap is a Rust command line tool. There is no web server built in. The service is a thin wrapper that accepts an uploaded dump, runs the CLI, stores the results, and serves them over HTTP.
