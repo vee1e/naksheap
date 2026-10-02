@@ -17,7 +17,9 @@ Svelte 5 + Vite, matching the other frontends in this fleet.
     src/lib/ProgressBar.svelte
     src/lib/types.ts      mirrors the wasm crate's JSON exactly
     src/lib/sample.ts     loads public/sample.core for the demo button
-    public/sample.core    the repo's own synthetic fixture, as a demo dump
+    public/sample.core        the repo's own synthetic fixture, as a demo dump
+    public/real-sample.core.gz  a real x86-64 core from scripts/real-src/test.cpp,
+                                 gzipped (9.7 MiB -> 60 KiB)
 
 ## Build
 
@@ -53,6 +55,27 @@ build command and output directory.
 The page has no backend dependency. `naksheap.lverma.com` is fully functional on
 its own; the API at `naksheap-api.lverma.com` is only needed for dumps above
 about 256 MiB, and the UI points people there when a file is too large.
+
+## Sample dumps
+
+Two are served as static assets and linked from the dropzone.
+
+`sample.core` is the synthetic fixture from `fixtures/`, built by
+`naksheap-testkit` with a ground-truth manifest. It is small and exercises a
+pointer ring, a stack root, a freed chunk and a vtable pointer.
+
+`real-sample.core.gz` is a genuine kernel core: `scripts/real-src/test.cpp`
+compiled `-O2` and stripped in Ubuntu 24.04, crashing with SIGSEGV, captured
+with the default core pattern. It is 9.7 MiB raw and 60 KiB gzipped. It
+recovers 24 objects including a 1 MiB mmap allocation, two arenas (main plus a
+thread arena), six tcache-freed chunks, and `Worker`/`Manager` correctly
+identified as vtable objects.
+
+Regenerate it with `scripts/real-dump-test.sh`, then:
+
+```bash
+gzip -9 -c target/real-dumps/test.crash.core > web/public/real-sample.core.gz
+```
 
 ## Size ceiling
 

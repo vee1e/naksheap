@@ -45,6 +45,14 @@
     <button onclick={() => input.click()} disabled={busy}>choose file</button>
     <button onclick={onsample} disabled={busy} class="ghost">use the sample</button>
   </div>
+  <p class="samples">
+    no dump to hand?
+    <a href="/sample.core" download>toy-server.core</a>
+    (synthetic, 58 KiB)
+    &middot;
+    <a href="/real-sample.core.gz" download>test.crash.core.gz</a>
+    (real SIGSEGV, x86-64, 9.7 MiB)
+  </p>
   {#if meta}
     <p class="meta">
       {meta.process ?? 'unknown process'}
@@ -99,6 +107,21 @@
     gap: 8px;
     justify-content: center;
     flex-wrap: wrap;
+  }
+  .samples {
+    margin: 14px 0 0;
+    font-size: 11px;
+    color: var(--grey-4);
+  }
+  .samples a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .samples a:hover {
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
   }
   .meta {
     margin: 14px 0 0;

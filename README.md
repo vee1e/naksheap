@@ -88,6 +88,15 @@ Each node carries its label, a confidence between 0 and 1, and evidence lines in
 
 The allocator parser targets glibc ptmalloc on 64-bit. jemalloc and tcmalloc heaps are not parsed.
 
+## Try it
+
+The web build has two sample dumps linked from the dropzone:
+
+| File | What it is |
+|---|---|
+| `sample.core` | Synthetic, 58 KiB. Built by the testkit, so its ground truth is known: 5 objects, one of them freed. |
+| `real-sample.core.gz` | A genuine kernel core, 9.7 MiB gzipped to 60 KiB. `scripts/real-src/test.cpp` compiled `-O2` and stripped in Ubuntu 24.04, crashing with SIGSEGV. Recovers 24 objects: a 1 MiB mmap allocation, two arenas, six freed chunks, and the polymorphic `Worker`/`Manager` objects identified as vtable objects. |
+
 ## Validation
 
 The pipeline is tested on two layers.

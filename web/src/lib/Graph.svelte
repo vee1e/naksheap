@@ -138,10 +138,14 @@
     return sim!.pos[i * 2 + 1] * scale + panY
   }
 
-  // Size is mapped onto radius so a large allocation is visibly larger, but
-  // the mapping is compressive: heaps span orders of magnitude in size.
+  // Size is mapped onto radius so a large allocation is visibly larger. The
+  // mapping is logarithmic because heaps span orders of magnitude: one real
+  // core had objects from 16 B to 1 MiB, a ratio of ~65,000x. The result is
+  // clamped because an unclamped log still gives that node a radius large
+  // enough to dominate the layout bounds, and the fit-to-view then zooms out
+  // until the rest of the graph is a cluster of dots off the side.
   function radius(node: Node) {
-    return 4 + (Math.log2(Math.max(node.size, 16)) - 4) * 1.6
+    return Math.min(28, 4 + (Math.log2(Math.max(node.size, 16)) - 4) * 1.4)
   }
 
   function nodeStyle(node: Node) {
@@ -227,7 +231,10 @@
         ctx.stroke()
         ctx.setLineDash([])
       }
-      if (scale > 0.5) {
+      // Labels are dropped when zoomed far out, otherwise a large graph turns
+      // into a wall of overlapping hex. The threshold is low because
+      // fit-to-view on a real dump routinely lands below 0.5.
+      if (scale > 0.18) {
         ctx.fillStyle = i === selected ? cssVar('--ink') : faint
         ctx.fillText('0x' + node.addr.toString(16), x, y + r + 11)
       }
