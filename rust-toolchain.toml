@@ -1,0 +1,10 @@
+[toolchain]
+# The workspace declares rust-version = "1.95". Pinning it here means local
+# builds, CI, and the Vercel build image all use the same compiler: build
+# environments ship whatever rustc happened to be current, and a Vercel image
+# with an older rustc fails with a confusing "package requires rustc 1.95"
+# rather than a toolchain error.
+channel = "1.95.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]
