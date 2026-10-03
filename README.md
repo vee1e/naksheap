@@ -114,9 +114,7 @@ Real core dumps come from `scripts/real-dump-test.sh`. It runs real C++ programs
 | Large bin lists | Unsorted, small, and large bins are not walked yet. Fastbin and tcache free lists are. |
 | No live debugging | This reads a static snapshot. It cannot groom a live heap or predict the next allocation. |
 
-## Web
-
-Two ways to run this in a browser, and they are not equivalent.
+## Web Service
 
 **In the browser, nothing is uploaded.** `crates/naksheap-wasm` compiles the
 pipeline to WebAssembly. The page reads the dump from a file input, analyzes it
