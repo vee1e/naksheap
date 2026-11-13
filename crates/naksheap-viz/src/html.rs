@@ -38,8 +38,30 @@ pub fn to_html(graph: &ObjectGraph) -> String {
 /// legible in monochrome and for readers who cannot rely on colour.
 const JS: &str = r#"
 const DATA = __DATA__;
-const NODES = DATA.elements.filter(function (e) { return e.kind === 'node'; });
-const EDGES = DATA.elements.filter(function (e) { return e.kind === 'edge'; });
+const ALL_NODES = DATA.elements.filter(function (e) { return e.kind === 'node'; });
+const ALL_EDGES = DATA.elements.filter(function (e) { return e.kind === 'edge'; });
+// Pairwise repulsion is O(n^2) per step. Keep the heaviest nodes so a
+// 30k-object dump cannot freeze the report.
+const MAX_LAYOUT_NODES = 2048;
+const NODES = (function () {
+  if (ALL_NODES.length <= MAX_LAYOUT_NODES) return ALL_NODES;
+  const degree = {};
+  for (let i = 0; i < ALL_EDGES.length; i++) {
+    const e = ALL_EDGES[i];
+    degree[e.source] = (degree[e.source] || 0) + 1;
+    degree[e.target] = (degree[e.target] || 0) + 1;
+  }
+  const ranked = ALL_NODES.slice().sort(function (a, b) {
+    return (degree[b.id] || 0) - (degree[a.id] || 0);
+  });
+  const keep = {};
+  for (let i = 0; i < ranked.length && i < MAX_LAYOUT_NODES; i++) keep[ranked[i].id] = true;
+  return ALL_NODES.filter(function (n) { return keep[n.id]; });
+})();
+const EDGES = ALL_EDGES.filter(function (e) {
+  return NODES.some(function (n) { return n.id === e.source; }) &&
+         NODES.some(function (n) { return n.id === e.target; });
+});
 
 // ---------------------------------------------------------------- layout
 // Fruchterman-Reingold, run incrementally so the browser stays responsive.
