@@ -212,7 +212,7 @@ fn evaluate_arena(image: &dyn AddressSpace, cand: u64) -> Option<ArenaCandidate>
             score += 15;
         } else if image
             .range_at(next)
-            .is_some_and(|r| r.kind == RangeKind::Anon && r.perms.write)
+            .is_some_and(|r| r.kind.is_heap_like() && r.perms.write)
         {
             score += 25;
         } else if image
@@ -265,10 +265,7 @@ pub fn find_arenas(image: &dyn AddressSpace) -> Vec<ArenaInfo> {
             .unwrap_or(range.end);
         // Only scan bytes physically present in the dump; a malicious range
         // claiming end == u64::MAX must not spin the loop forever.
-        let scan_end = range
-            .start
-            .saturating_add(range.file_size)
-            .min(range.end);
+        let scan_end = range.start.saturating_add(range.file_size).min(range.end);
         // Cap the words scanned per range (amplification guard).
         let scan_end = scan_end.min(scan_start.saturating_add(MAX_SCAN_WORDS * 8));
         if scan_end <= scan_start {
@@ -288,7 +285,7 @@ pub fn find_arenas(image: &dyn AddressSpace) -> Vec<ArenaInfo> {
             if let Some(top) = image.read_word(p) {
                 if image
                     .range_at(top)
-                    .is_some_and(|r| r.kind == RangeKind::Anon && r.perms.write)
+                    .is_some_and(|r| r.kind.is_heap_like() && r.perms.write)
                 {
                     // The word at `p` is the arena's `top` field, so the
                     // `malloc_state` struct begins `ARENA_TOP_OFFSET` earlier.
@@ -326,9 +323,9 @@ pub fn find_arenas(image: &dyn AddressSpace) -> Vec<ArenaInfo> {
             .and_then(|p| image.read_word(p))
         {
             if next != cand {
-                let plausible = image
-                    .range_at(next)
-                    .is_some_and(|r| r.perms.write && (r.kind == RangeKind::Anon || r.kind == RangeKind::File));
+                let plausible = image.range_at(next).is_some_and(|r| {
+                    r.perms.write && (r.kind == RangeKind::Anon || r.kind == RangeKind::File)
+                });
                 if plausible && seen.insert(next) {
                     if let Some(ac) = evaluate_arena(image, next) {
                         arenas.push(ArenaInfo {
@@ -355,7 +352,8 @@ pub fn find_arenas(image: &dyn AddressSpace) -> Vec<ArenaInfo> {
     // false positives very unlikely (stacks and mmap buffers do not start
     // with an in-region `malloc_state` pointer).
     for region in image.map().writable_ranges() {
-        if region.len() < PAGE_SIZE || !matches!(region.kind, RangeKind::Anon | RangeKind::Unknown) {
+        if region.len() < PAGE_SIZE || !matches!(region.kind, RangeKind::Anon | RangeKind::Unknown)
+        {
             continue;
         }
         let Some(ar_ptr) = image.read_word(region.start) else {
@@ -489,7 +487,11 @@ fn probe_walk_region(
     // only let a challenger displace an anchor on a DECISIVE margin (>= 2x)
     // so a dense array of chunk-lookalike words inside the first page cannot
     // steal the walk.
-    let anchor = if prefer_offset0 { Some(0x0u64) } else { arena_anchor };
+    let anchor = if prefer_offset0 {
+        Some(0x0u64)
+    } else {
+        arena_anchor
+    };
     let best_off = match anchor {
         Some(a) => match ranked.iter().find(|(o, _)| *o == a) {
             Some(&(_, anchor_count)) => {
@@ -501,9 +503,21 @@ fn probe_walk_region(
                     .max_by_key(|(_, c)| *c);
                 challenger.map(|(o, _)| *o).unwrap_or(a)
             }
-            None => ranked.iter().max_by_key(|(_, c)| *c).expect("ranked non-empty").0,
+            None => {
+                ranked
+                    .iter()
+                    .max_by_key(|(_, c)| *c)
+                    .expect("ranked non-empty")
+                    .0
+            }
         },
-        None => ranked.iter().max_by_key(|(_, c)| *c).expect("ranked non-empty").0,
+        None => {
+            ranked
+                .iter()
+                .max_by_key(|(_, c)| *c)
+                .expect("ranked non-empty")
+                .0
+        }
     };
 
     let start = region.start.checked_add(best_off).unwrap_or(region.start);
@@ -548,6 +562,27 @@ fn reveal_safe_link(pos: u64, v: u64) -> u64 {
     (pos >> 12) ^ v
 }
 
+/// Indices of the first carved chunk in each contiguous heap run whose
+/// usable size is `0x280` — the glibc `tcache_perthread_struct` shape.
+fn first_heap_chunk_indices(objects: &[Object]) -> HashSet<usize> {
+    let mut order: Vec<usize> = (0..objects.len()).collect();
+    order.sort_by_key(|&i| objects[i].chunk_header);
+    let mut firsts = HashSet::new();
+    let mut prev_next_header: Option<u64> = None;
+    for i in order {
+        let o = &objects[i];
+        let starts_run = match prev_next_header {
+            None => true,
+            Some(next) => o.chunk_header != next,
+        };
+        if starts_run && o.size == 0x280 {
+            firsts.insert(i);
+        }
+        prev_next_header = Some(o.chunk_header.saturating_add(o.size.saturating_add(0x10)));
+    }
+    firsts
+}
+
 /// Marks chunks freed into glibc's per-thread tcache as [`Freed`].
 ///
 /// tcache'd chunks do NOT clear the successor's `PREV_INUSE` bit (that only
@@ -559,9 +594,9 @@ fn reveal_safe_link(pos: u64, v: u64) -> u64 {
 /// a freed chunk.
 fn mark_tcache_freed(image: &dyn AddressSpace, objects: &mut [Object]) {
     const MAX_CHAIN: usize = 16; // TCACHE_FILL_COUNT is 7
-    // Global step budget so a crafted dump full of tcache-lookalike objects
-    // cannot stall carving (each candidate would otherwise cost up to
-    // 64 bins * 16 chain steps).
+                                 // Global step budget so a crafted dump full of tcache-lookalike objects
+                                 // cannot stall carving (each candidate would otherwise cost up to
+                                 // 64 bins * 16 chain steps).
     const MAX_STEPS: usize = 4096;
     let by_addr: HashMap<u64, usize> = objects
         .iter()
@@ -570,11 +605,20 @@ fn mark_tcache_freed(image: &dyn AddressSpace, objects: &mut [Object]) {
         .collect();
     let mut freed: Vec<usize> = Vec::new();
     let mut steps = 0usize;
-    for obj in objects.iter() {
+    // glibc allocates tcache_perthread_struct as the first chunk of each
+    // arena heap, with usable size 0x280 (chunk size 0x290). Treat only
+    // those first 0x280-byte chunks as candidates so a later object whose
+    // first 64 u16s just happen to be small integers is not mistaken for
+    // a tcache and used to mark live objects Freed.
+    let tcache_candidates = first_heap_chunk_indices(objects);
+    for (obj_i, obj) in objects.iter().enumerate() {
         if steps >= MAX_STEPS {
             break;
         }
-        if obj.state != ObjectState::Allocated || obj.size < 0x280 {
+        if obj.state != ObjectState::Allocated || obj.size != 0x280 {
+            continue;
+        }
+        if !tcache_candidates.contains(&obj_i) {
             continue;
         }
         // tcache_perthread_struct: u16 counts[64] at +0, entries[64] at +0x80.
@@ -705,11 +749,11 @@ fn carve_mmap_region(image: &dyn AddressSpace, region: &MemoryRange) -> Option<O
     // page-aligned chunk size. Requiring all of them rejects stacks and
     // arbitrary anon buffers whose first words merely look pointer-ish.
     let prev_size = image.read_u64(region.start)?;
-    let size_field = region.start.checked_add(8).and_then(|p| image.read_u64(p))?;
-    if prev_size != 0
-        || size_field & IS_MMAPPED == 0
-        || size_field & PREV_INUSE != 0
-    {
+    let size_field = region
+        .start
+        .checked_add(8)
+        .and_then(|p| image.read_u64(p))?;
+    if prev_size != 0 || size_field & IS_MMAPPED == 0 || size_field & PREV_INUSE != 0 {
         return None;
     }
     let mask = size_field & !0xF;
@@ -786,29 +830,27 @@ pub fn carve(image: &dyn AddressSpace) -> HeapInventory {
 
     let mut carve_region =
         |region: &MemoryRange, arena: Option<u64>, min_chunks: usize, is_main: bool| {
-        if !walked.insert(region.start) {
-            return;
-        }
-        let mut region_objects = collect_objects(image, region, arena, min_chunks, is_main);
-        // Bound the object count DURING carving (not only at the end) so a
-        // dump with many plausible regions cannot accumulate N * MAX_OBJECTS
-        // objects (and matching tcache/fastbin HashMaps) in memory.
-        region_objects.truncate(MAX_OBJECTS.saturating_sub(objects.len()));
-        if region_objects.is_empty() {
-            return;
-        }
-        mark_tcache_freed(image, &mut region_objects);
-        if let Some(a) = arena {
-            mark_fastbin_freed(image, a, &mut region_objects);
-        }
-        objects.extend(region_objects);
-    };
+            if !walked.insert(region.start) {
+                return;
+            }
+            let mut region_objects = collect_objects(image, region, arena, min_chunks, is_main);
+            // Bound the object count DURING carving (not only at the end) so a
+            // dump with many plausible regions cannot accumulate N * MAX_OBJECTS
+            // objects (and matching tcache/fastbin HashMaps) in memory.
+            region_objects.truncate(MAX_OBJECTS.saturating_sub(objects.len()));
+            if region_objects.is_empty() {
+                return;
+            }
+            mark_tcache_freed(image, &mut region_objects);
+            if let Some(a) = arena {
+                mark_fastbin_freed(image, a, &mut region_objects);
+            }
+            objects.extend(region_objects);
+        };
 
     for arena in &inventory.arenas {
         if let Some(region) = image.range_at(arena.top) {
-            if matches!(region.kind, RangeKind::Anon | RangeKind::Unknown)
-                && region.perms.write
-            {
+            if matches!(region.kind, RangeKind::Anon | RangeKind::Unknown) && region.perms.write {
                 // A self-looping main_arena is strong evidence by itself, so
                 // accept a single chunk; every other arena path must clear the
                 // same 3-chunk bar as the arena-less fallback so stack-like
@@ -986,7 +1028,10 @@ mod tests {
         // carve() must surface the same objects, Allocated, no top chunk.
         let inv = crate::carve(&img);
         assert_eq!(inv.objects.len(), 3);
-        assert!(inv.objects.iter().all(|o| o.state == ObjectState::Allocated));
+        assert!(inv
+            .objects
+            .iter()
+            .all(|o| o.state == ObjectState::Allocated));
         assert_eq!(inv.objects[0].addr, H + 0x10);
         assert_eq!(inv.objects[0].size, 0x20);
         assert_eq!(inv.objects[1].addr, H + 0x40);
@@ -1000,7 +1045,7 @@ mod tests {
         let mut b = ImageBuilder::new();
         base_heap(&mut b);
         place_chunk(&mut b, H, 0x30, PREV_INUSE, 0x41); // user H+0x10
-        // Next chunk's PREV_INUSE clear => chunk[0] is freed.
+                                                        // Next chunk's PREV_INUSE clear => chunk[0] is freed.
         place_chunk(&mut b, H + 0x40, 0x20, 0, 0x42); // user H+0x50
         place_chunk(&mut b, H + 0x70, 0x20, PREV_INUSE, 0x43); // user H+0x80
         place_top(&mut b, H + 0xa0, H_END);
@@ -1022,8 +1067,8 @@ mod tests {
         base_heap(&mut b);
         place_chunk(&mut b, H, 0x30, PREV_INUSE, 0x41); // user H+0x10
         place_chunk(&mut b, H + 0x40, 0x20, PREV_INUSE, 0x42); // user H+0x50
-        // Garbage size field that exceeds the region (PREV_INUSE set so the
-        // preceding chunk still reads as Allocated).
+                                                               // Garbage size field that exceeds the region (PREV_INUSE set so the
+                                                               // preceding chunk still reads as Allocated).
         b.write_u64(H + 0x70 + 8, 0xDEAD_BEEF_0000_0001);
         // Out-of-bounds read after the garbage must not panic.
         let img = b.build();
@@ -1226,16 +1271,16 @@ mod tests {
     fn walk_heap_excludes_top_chunk_consuming_entire_region() {
         let mut b = ImageBuilder::new();
         base_heap(&mut b); // H..H_END
-        // Adjacent mapped range right after the heap: without the `>=` guard
-        // a walk would read the "next chunk" size at H_END+8 successfully and
-        // emit the top chunk as a spurious Allocated object.
+                           // Adjacent mapped range right after the heap: without the `>=` guard
+                           // a walk would read the "next chunk" size at H_END+8 successfully and
+                           // emit the top chunk as a spurious Allocated object.
         add_heap(&mut b, H_END, 0x1000);
         b.write_u64(H_END + 8, 0x30 | PREV_INUSE);
 
         place_chunk(&mut b, H, 0x20, PREV_INUSE, 0x41); // user H+0x10
         place_chunk(&mut b, H + 0x30, 0x20, PREV_INUSE, 0x42); // user H+0x40
         place_chunk(&mut b, H + 0x60, 0x20, PREV_INUSE, 0x43); // user H+0x70
-        // The top chunk consumes exactly the remaining bytes of the region.
+                                                               // The top chunk consumes exactly the remaining bytes of the region.
         place_top(&mut b, H + 0x90, H_END);
 
         let img = b.build();
@@ -1257,9 +1302,9 @@ mod tests {
     fn probe_walk_region_skips_heap_info_header() {
         let mut b = ImageBuilder::new();
         base_heap(&mut b); // H..H_END
-        // heap_info-shaped 0x20-byte header: ar_ptr, prev, size,
-        // mprotect_size. Walking from offset 0 reads `prev` as the chunk size
-        // (0) and yields nothing; the probe must start at H+0x20.
+                           // heap_info-shaped 0x20-byte header: ar_ptr, prev, size,
+                           // mprotect_size. Walking from offset 0 reads `prev` as the chunk size
+                           // (0) and yields nothing; the probe must start at H+0x20.
         b.write_u64(H, 0x7faa_0000_0100);
         b.write_u64(H + 0x08, 0);
         b.write_u64(H + 0x10, H_END - H);
@@ -1295,7 +1340,7 @@ mod tests {
         // malloc_state sits right after the 0x20-byte heap_info (real layout).
         let arena = A + 0x30;
         let top = H + 0xb0; // top chunk header
-        // heap_info at the region start: ar_ptr -> the malloc_state in-region.
+                            // heap_info at the region start: ar_ptr -> the malloc_state in-region.
         b.write_u64(A, arena);
         b.write_u64(arena + ARENA_TOP_OFFSET, top);
         b.write_u64(arena + ARENA_SYSTEM_MEM_OFFSET, H_END - H);
@@ -1349,7 +1394,10 @@ mod tests {
         assert_eq!(arenas[0].addr, arena);
         assert_eq!(arenas[0].top, top);
         assert_eq!(arenas[0].size, 0x1000);
-        assert!(arenas[0].is_main, "an arena in libc file-backed data is main_arena");
+        assert!(
+            arenas[0].is_main,
+            "an arena in libc file-backed data is main_arena"
+        );
     }
 
     #[test]
@@ -1367,7 +1415,7 @@ mod tests {
         const M: u64 = 0x7f00_1000_0000;
         let mut b = ImageBuilder::new();
         add_heap(&mut b, M, 0x101000);
-        b.write_u64(M, 0);                        // prev_size
+        b.write_u64(M, 0); // prev_size
         b.write_u64(M + 8, 0x101000 | IS_MMAPPED); // size | IS_MMAPPED
         b.write(M + 0x10, &vec![0x42u8; 0x1000]);
 
@@ -1419,7 +1467,56 @@ mod tests {
             .iter()
             .find(|o| o.addr == freed_user)
             .expect("freed chunk carved");
-        assert_eq!(freed.state, ObjectState::Freed, "tcache cross-ref must mark freed");
+        assert_eq!(
+            freed.state,
+            ObjectState::Freed,
+            "tcache cross-ref must mark freed"
+        );
+    }
+
+    #[test]
+    fn later_large_object_is_not_treated_as_tcache() {
+        // A 0x280 object that is *not* the first chunk of its heap can look
+        // like a tcache_perthread_struct if its first 64 u16s are small.
+        // It must not mark a live object whose address happens to appear in
+        // that region as Freed.
+        const L: u64 = 0x7faa_0000_0000;
+        let mut b = ImageBuilder::new();
+        add_libc(&mut b, L, 0x1000);
+        add_heap(&mut b, H, H_END - H);
+
+        let arena = L + 0x100;
+        let first = H;
+        let lookalike = H + 0x30; // after a small first chunk (usable 0x20)
+        let live_header = lookalike + 0x290;
+        let live_user = live_header + 0x10;
+        let top = live_header + 0x20;
+        b.write_u64(arena + ARENA_TOP_OFFSET, top);
+        b.write_u64(arena + ARENA_NEXT_OFFSET, arena);
+        b.write_u64(arena + ARENA_SYSTEM_MEM_OFFSET, H_END - H);
+
+        // First chunk is small, so it is not a tcache.
+        place_chunk(&mut b, first, 0x20, PREV_INUSE, 0);
+        // Lookalike 0x280 object: counts[0]=1 and entries[0] points at a
+        // later live chunk.
+        place_chunk(&mut b, lookalike, 0x280, PREV_INUSE, 0);
+        b.write_u64(lookalike + 0x10, 1);
+        b.write_u64(lookalike + 0x10 + 0x80, live_user);
+        place_chunk(&mut b, live_header, 0x10, PREV_INUSE, 0xAB);
+        place_top(&mut b, top, H_END);
+
+        let img = b.build();
+        let inv = crate::carve(&img);
+        let live = inv
+            .objects
+            .iter()
+            .find(|o| o.addr == live_user)
+            .expect("live chunk carved");
+        assert_eq!(
+            live.state,
+            ObjectState::Allocated,
+            "a later 0x280 object must not be used as tcache"
+        );
     }
 
     #[test]
@@ -1444,7 +1541,7 @@ mod tests {
         let fc2_header = H + 0x2b0;
         let fc2_user = fc2_header + 0x10;
         b.write_u64(arena + 0x10, fc1_header); // fastbinsY[0] stores a header
-        // tcache struct (counts all zero -> not a tcache candidate here).
+                                               // tcache struct (counts all zero -> not a tcache candidate here).
         place_chunk(&mut b, H, 0x280, PREV_INUSE, 0);
         // Two freed chunks (headers with PREV_INUSE set so the header
         // heuristic alone would say "allocated").
@@ -1457,10 +1554,22 @@ mod tests {
 
         let img = b.build();
         let inv = crate::carve(&img);
-        let f1 = inv.objects.iter().find(|o| o.addr == fc1_user).expect("fc1");
-        let f2 = inv.objects.iter().find(|o| o.addr == fc2_user).expect("fc2");
+        let f1 = inv
+            .objects
+            .iter()
+            .find(|o| o.addr == fc1_user)
+            .expect("fc1");
+        let f2 = inv
+            .objects
+            .iter()
+            .find(|o| o.addr == fc2_user)
+            .expect("fc2");
         assert_eq!(f1.state, ObjectState::Freed, "fastbin head must be freed");
-        assert_eq!(f2.state, ObjectState::Freed, "fastbin fd-chain link must be freed");
+        assert_eq!(
+            f2.state,
+            ObjectState::Freed,
+            "fastbin fd-chain link must be freed"
+        );
         assert_eq!(f1.freed_reason, Some(crate::FreedReason::Fastbin));
     }
 
