@@ -10,6 +10,10 @@ services:
       NAKSHEAP_ARTIFACTS: /data
       NAKSHEAP_MAX_UPLOAD_BYTES: "10737418240" # 10 GiB
       NAKSHEAP_MAX_REPORTS: "1000"
+      NAKSHEAP_UPLOAD_DIR: /data/.uploads
+      # Set NAKSHEAP_API_TOKEN (or pass it via an env file). Without it the
+      # container stays healthy on /health, but analyze/list/download return 401.
+      # NAKSHEAP_API_TOKEN: "replace-me"
     volumes:
       - naksheap-data:/data
     # The analyzer NEVER initiates outbound connections by design (dump
@@ -28,7 +32,7 @@ services:
           memory: 4Gi
           cpus: "2"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/reports/')"]
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/health')"]
       interval: 30s
       timeout: 5s
       retries: 3

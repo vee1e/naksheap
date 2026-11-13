@@ -22,7 +22,7 @@
     pos: Float64Array
     vel: Float64Array
     idx: Map<number, number>
-    links: [number, number][]
+    links: [number, number, boolean][]
     bounds: { minX: number; maxX: number; minY: number; maxY: number }
   }
 
@@ -33,8 +33,12 @@
   let settled = $state(false)
 
   const ITER = 300
+  // Pairwise repulsion is O(n²) per step. Cap the laid-out graph so a
+  // 30k-object dump cannot freeze the tab. The table still lists every node.
+  const MAX_LAYOUT_NODES = 2048
   let iter = 0
   let raf = 0
+  let layoutNodes: Node[] = []
 
   // Deterministic seeding: the same graph always lays out the same way, so two
   // runs can be compared by eye.
@@ -51,16 +55,34 @@
     return pos
   }
 
+  function selectLayoutNodes(all: Node[], allEdges: GraphEdge[]): Node[] {
+    if (all.length <= MAX_LAYOUT_NODES) return all
+    const degree = new Map<number, number>()
+    for (const e of allEdges) {
+      degree.set(e.from, (degree.get(e.from) || 0) + 1)
+      degree.set(e.to, (degree.get(e.to) || 0) + 1)
+    }
+    const ranked = all.slice().sort((a, b) => (degree.get(b.addr) || 0) - (degree.get(a.addr) || 0))
+    const keep = new Set<number>()
+    if (focus != null) keep.add(focus)
+    for (const n of ranked) {
+      if (keep.size >= MAX_LAYOUT_NODES) break
+      keep.add(n.addr)
+    }
+    return all.filter((n) => keep.has(n.addr))
+  }
+
   function rebuild() {
-    const n = nodes.length
+    layoutNodes = selectLayoutNodes(nodes, edges)
+    const n = layoutNodes.length
     const pos = seededPositions(n)
     const idx = new Map<number, number>()
-    for (let i = 0; i < n; i++) idx.set(nodes[i].addr, i)
-    const links: [number, number][] = []
+    for (let i = 0; i < n; i++) idx.set(layoutNodes[i].addr, i)
+    const links: [number, number, boolean][] = []
     for (const e of edges) {
       const s = idx.get(e.from)
       const t = idx.get(e.to)
-      if (s !== undefined && t !== undefined) links.push([s, t])
+      if (s !== undefined && t !== undefined) links.push([s, t, !!e.confirmed])
     }
     sim = {
       pos,
@@ -75,7 +97,7 @@
 
   function step(W: number, H: number) {
     if (!sim) return
-    const n = nodes.length
+    const n = layoutNodes.length
     if (n === 0) {
       settled = true
       return
@@ -191,9 +213,7 @@
 
     ctx.save()
     for (let i = 0; i < sim.links.length; i++) {
-      const [s, t] = sim.links[i]
-      const e = edges[i]
-      const confirmed = e?.confirmed
+      const [s, t, confirmed] = sim.links[i]
       ctx.strokeStyle = confirmed ? cssVar('--ink') : dim
       ctx.lineWidth = confirmed ? 1.5 : 1
       ctx.setLineDash(confirmed ? [] : [3, 3])
@@ -207,8 +227,8 @@
     ctx.font =
       '10px ' + (getComputedStyle(canvas).getPropertyValue('--mono').trim() || 'monospace')
     ctx.textAlign = 'center'
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i]
+    for (let i = 0; i < layoutNodes.length; i++) {
+      const node = layoutNodes[i]
       const st = nodeStyle(node)
       const x = sx(i)
       const y = sy(i)
@@ -246,8 +266,8 @@
     if (!sim) return null
     let best: number | null = null
     let bestD = Infinity
-    for (let i = 0; i < nodes.length; i++) {
-      const r = radius(nodes[i]) + 5
+    for (let i = 0; i < layoutNodes.length; i++) {
+      const r = radius(layoutNodes[i]) + 5
       const d = (px - sx(i)) ** 2 + (py - sy(i)) ** 2
       if (d < r * r && d < bestD) {
         bestD = d
@@ -380,7 +400,7 @@
 
   // Push the selection upward after the pointer handler sets it.
   $effect(() => {
-    onSelect(selected !== null ? nodes[selected] : null)
+    onSelect(selected !== null ? layoutNodes[selected] ?? null : null)
   })
 
   let ready = $derived(!!sim)

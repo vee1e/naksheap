@@ -11,21 +11,33 @@ use naksheap_allocator_heuristics::Object;
 /// For the disjoint heaps naksheap normally targets, the walk exits after a
 /// single check (O(log n) binary search + O(1)). Carve output can overlap
 /// however — e.g. a corrupt-but-plausible chunk size yields an object whose
-/// range swallows a real neighbor — so the walk keeps going backward while a
-/// predecessor could still contain the address. This returns the largest-start
-/// (innermost/smallest) container exactly for such overlapping output too,
-/// while staying O(1) amortized because the walk is bounded by the overlap
-/// chain and stops as soon as a predecessor ends at or before the query.
+/// range swallows a real neighbor — so the walk keeps going backward while
+/// *any* predecessor could still contain the address. That test uses a prefix
+/// maximum of object ends, not only the immediate predecessor: a short
+/// neighbour sitting just before the query must not hide a longer outer
+/// object that started earlier and still covers the address. The walk still
+/// returns the largest-start (innermost/smallest) container.
 #[derive(Debug, Clone)]
 pub struct ObjectIndex {
     objects: Vec<Object>,
+    /// `max_end_upto[i]` is the maximum of `addr + size` for `objects[0..=i]`.
+    max_end_upto: Vec<u64>,
 }
 
 /// Builds a fast lookup from a virtual address to the object containing it.
 pub fn index_objects(objects: &[Object]) -> ObjectIndex {
     let mut sorted = objects.to_vec();
     sorted.sort_by_key(|o| (o.addr, o.size));
-    ObjectIndex { objects: sorted }
+    let mut max_end_upto = Vec::with_capacity(sorted.len());
+    let mut run = 0u64;
+    for o in &sorted {
+        run = run.max(o.addr.saturating_add(o.size));
+        max_end_upto.push(run);
+    }
+    ObjectIndex {
+        objects: sorted,
+        max_end_upto,
+    }
 }
 
 impl ObjectIndex {
@@ -37,9 +49,7 @@ impl ObjectIndex {
     pub fn target_at(&self, addr: u64) -> Option<&Object> {
         // Rightmost object that starts at or before `addr`, so it satisfies
         // `o.addr <= addr` (no underflow below).
-        let mut i = self
-            .objects
-            .partition_point(|o| o.addr <= addr) as isize - 1;
+        let mut i = self.objects.partition_point(|o| o.addr <= addr) as isize - 1;
         while i >= 0 {
             let o = &self.objects[i as usize];
             let delta = addr - o.addr;
@@ -51,15 +61,15 @@ impl ObjectIndex {
                 // overlaps.
                 return Some(o);
             }
-            // `o` ends at or before `addr`. Move on to its predecessor only
-            // while that predecessor could still reach past `addr` (overlap);
-            // once a predecessor ends at or before `addr`, no earlier
-            // (smaller-start) object can contain it either and the walk stops.
+            // `o` ends at or before `addr`. Keep walking only while some
+            // earlier object could still cover `addr`. The prefix maximum is
+            // required: the immediate predecessor may be a short nested
+            // object that ends before the query, while an outer object that
+            // started earlier still contains it.
             if i == 0 {
                 break;
             }
-            let prev = &self.objects[i as usize - 1];
-            if prev.addr.checked_add(prev.size).is_none_or(|end| end <= addr) {
+            if self.max_end_upto[i as usize - 1] <= addr {
                 break;
             }
             i -= 1;
@@ -87,7 +97,9 @@ mod tests {
     #[test]
     fn target_at_large_index_is_fast_and_exact() {
         const N: u64 = 100_000;
-        let objects: Vec<Object> = (0..N).map(|i| obj(0x1_0000_0000 + i * 0x100, 0x40)).collect();
+        let objects: Vec<Object> = (0..N)
+            .map(|i| obj(0x1_0000_0000 + i * 0x100, 0x40))
+            .collect();
         let index = index_objects(&objects);
 
         // Hit: the query address must resolve to exactly the object that owns
@@ -107,7 +119,9 @@ mod tests {
     #[test]
     fn target_at_miss_at_end_terminates_immediately() {
         const N: u64 = 100_000;
-        let objects: Vec<Object> = (0..N).map(|i| obj(0x1_0000_0000 + i * 0x100, 0x40)).collect();
+        let objects: Vec<Object> = (0..N)
+            .map(|i| obj(0x1_0000_0000 + i * 0x100, 0x40))
+            .collect();
         let index = index_objects(&objects);
 
         // Address just past the final object's end: the early-exit must break
@@ -146,5 +160,18 @@ mod tests {
         let objects = vec![obj(0x2000, 0x40), obj(0x2010, 0x10)];
         let index = index_objects(&objects);
         assert!(index.target_at(0x2050).is_none());
+    }
+
+    #[test]
+    fn target_at_outer_object_not_hidden_by_earlier_nested_neighbor() {
+        // A = [0x1000, 0x1100), B = [0x1010, 0x1020), C = [0x1030, 0x1040).
+        // Query 0x1050 sits past B and C but still inside A. Walking backward
+        // from C used to stop at B (which ends before the query) and miss A.
+        let objects = vec![obj(0x1000, 0x100), obj(0x1010, 0x10), obj(0x1030, 0x10)];
+        let index = index_objects(&objects);
+        assert_eq!(index.target_at(0x1050).unwrap().addr, 0x1000);
+        // Innermost still wins when the query is inside a nested object.
+        assert_eq!(index.target_at(0x1018).unwrap().addr, 0x1010);
+        assert_eq!(index.target_at(0x1038).unwrap().addr, 0x1030);
     }
 }

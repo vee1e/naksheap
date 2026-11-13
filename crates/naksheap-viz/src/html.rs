@@ -38,8 +38,32 @@ pub fn to_html(graph: &ObjectGraph) -> String {
 /// legible in monochrome and for readers who cannot rely on colour.
 const JS: &str = r#"
 const DATA = __DATA__;
-const NODES = DATA.elements.filter(function (e) { return e.kind === 'node'; });
-const EDGES = DATA.elements.filter(function (e) { return e.kind === 'edge'; });
+const ALL_NODES = DATA.elements.filter(function (e) { return e.kind === 'node'; });
+const ALL_EDGES = DATA.elements.filter(function (e) { return e.kind === 'edge'; });
+// Pairwise repulsion is O(n^2) per step. Keep the heaviest nodes so a
+// 30k-object dump cannot freeze the report. Build the keep-set once and
+// use it for both the node cap and the edge filter (not O(E*N) some()).
+const MAX_LAYOUT_NODES = 2048;
+const KEEP = (function () {
+  const keep = {};
+  if (ALL_NODES.length <= MAX_LAYOUT_NODES) {
+    for (let i = 0; i < ALL_NODES.length; i++) keep[ALL_NODES[i].id] = true;
+    return keep;
+  }
+  const degree = {};
+  for (let i = 0; i < ALL_EDGES.length; i++) {
+    const e = ALL_EDGES[i];
+    degree[e.source] = (degree[e.source] || 0) + 1;
+    degree[e.target] = (degree[e.target] || 0) + 1;
+  }
+  const ranked = ALL_NODES.slice().sort(function (a, b) {
+    return (degree[b.id] || 0) - (degree[a.id] || 0);
+  });
+  for (let i = 0; i < ranked.length && i < MAX_LAYOUT_NODES; i++) keep[ranked[i].id] = true;
+  return keep;
+})();
+const NODES = ALL_NODES.filter(function (n) { return KEEP[n.id]; });
+const EDGES = ALL_EDGES.filter(function (e) { return KEEP[e.source] && KEEP[e.target]; });
 
 // ---------------------------------------------------------------- layout
 // Fruchterman-Reingold, run incrementally so the browser stays responsive.

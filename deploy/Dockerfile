@@ -1,5 +1,5 @@
 # Multi-stage: build the Rust binary, then a slim runtime image.
-FROM rust:1.95 AS build
+FROM rust:1.95-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
@@ -19,6 +19,7 @@ RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin naksheap \
 USER naksheap
 ENV NAKSHEAP_BIN=naksheap \
     NAKSHEAP_ARTIFACTS=/data \
+    NAKSHEAP_UPLOAD_DIR=/data/.uploads \
     NAKSHEAP_PORT=8080
 EXPOSE 8080
 VOLUME ["/data"]

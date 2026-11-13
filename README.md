@@ -83,7 +83,7 @@ Each node carries its label, a confidence between 0 and 1, and evidence lines in
 |---|---|
 | ELF core dumps, x86-64 | primary; validated on synthetic fixtures, real-core runs pending |
 | ELF core dumps, aarch64 | works, validated against real cores |
-| Windows minidumps | memory list only, 64-bit, no threads or registers |
+| Windows minidumps | CLI only: memory list, 64-bit, no threads or registers. The in-browser wasm build rejects them with a clear error. |
 | 32-bit, macOS cores, /proc/kcore, QEMU snapshots | not supported |
 
 The allocator parser targets glibc ptmalloc on 64-bit. jemalloc and tcmalloc heaps are not parsed.
@@ -131,22 +131,26 @@ and points at the service for anything larger. Larger dumps, and CI, use the
 service:
 
 - API: `naksheap-api.lverma.com`, `PUT /analyze` with the raw dump as the body.
+  Every analyze, list, and download request must send
+  `Authorization: Bearer $NAKSHEAP_API_TOKEN`. `/health` is unauthenticated
+  so the process can stay up even when the token is not yet configured.
 
 ```bash
 curl -s -X PUT --data-binary @core.dump \
      -H 'Content-Type: application/octet-stream' \
+     -H "Authorization: Bearer $NAKSHEAP_API_TOKEN" \
      https://naksheap-api.lverma.com/analyze
 ```
 
-The service keeps the report and the graph, then deletes the raw core. See
-`deployment.md` for the service configuration and `web/README.md` for the
-frontend build.
+The service keeps the report and the graph, then deletes the raw core. The
+raw dump is never served from `/reports/`. See `deployment.md` for the
+service configuration and `web/README.md` for the frontend build.
 
 ## Privacy
 
 Analysis is fully offline. The HTML report is a single self-contained file: the graph data and the renderer are both embedded, so opening a report makes no network request of any kind. There is no CDN, no external font, no analytics.
 
-Dumps can contain credentials and keys, so the browser build is the default and the safer one: nothing is uploaded. The service at `naksheap-api.lverma.com` does receive the file, holds the report for 24 hours, and deletes the raw core as soon as the analysis finishes.
+Dumps can contain credentials and keys, so the browser build is the default and the safer one: nothing is uploaded. The service at `naksheap-api.lverma.com` does receive the file, holds the report for 24 hours, and deletes the raw core as soon as the analysis finishes. Listing and downloading reports, and uploading a dump, all require a bearer token.
 
 ## License
 

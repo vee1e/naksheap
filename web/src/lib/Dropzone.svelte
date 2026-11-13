@@ -38,7 +38,7 @@
   />
   <p class="lead">drop a core dump</p>
   <p class="sub">
-    elf64 x86-64 or aarch64, or a 64-bit windows minidump. nothing is uploaded: the
+    elf64 x86-64 or aarch64. minidumps are rejected here with a clear error; use the CLI or the API service for those. nothing is uploaded: the
     analyzer runs in this tab.
   </p>
   <div class="actions">
