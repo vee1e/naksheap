@@ -39,6 +39,14 @@ pub enum RangeKind {
     Unknown,
 }
 
+impl RangeKind {
+    /// Heap-like ranges: anonymous mappings, and minidump regions whose
+    /// backing is not recorded. Both are candidates for glibc carving.
+    pub fn is_heap_like(self) -> bool {
+        matches!(self, RangeKind::Anon | RangeKind::Unknown)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MemoryRange {
     pub start: u64,
@@ -113,7 +121,7 @@ impl MemoryMap {
     }
 
     pub fn anon_ranges(&self) -> impl Iterator<Item = &MemoryRange> {
-        self.ranges.iter().filter(|r| r.kind == RangeKind::Anon)
+        self.ranges.iter().filter(|r| r.kind.is_heap_like())
     }
 
     pub fn writable_ranges(&self) -> impl Iterator<Item = &MemoryRange> {

@@ -230,6 +230,12 @@ pub fn analyze_with(
     if bytes.is_empty() {
         return Err(AnalyzeError("the file is empty".into()));
     }
+    if bytes.starts_with(b"MDMP") {
+        return Err(AnalyzeError(
+            "this is a minidump; the in-browser analyzer only accepts              ELF core dumps. Use the naksheap CLI or the API service              for minidumps."
+                .into(),
+        ));
+    }
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(AnalyzeError(format!(
             "dump is {} MiB, over the {} MiB in-browser limit; use the \
