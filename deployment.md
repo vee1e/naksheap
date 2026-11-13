@@ -92,8 +92,15 @@ Upload with curl. The raw request body is the dump file.
 ```bash
 curl -s -X PUT --data-binary @/path/to/core.dump \
      -H 'Content-Type: application/octet-stream' \
+     -H "Authorization: Bearer $NAKSHEAP_API_TOKEN" \
      http://localhost:8080/analyze?name=my-crash
 ```
+
+Set `NAKSHEAP_API_TOKEN` in the server environment before exposing the
+service. If the variable is unset, `/health` still returns 200 so the
+container stays up, but `/analyze`, `/reports/`, and artifact downloads
+all return 401. `/health` is the liveness probe; do not point a
+healthcheck at `/reports/`.
 
 The response is JSON with the object counts and links to the report, the graph JSON, and the Graphviz file. Open the report link in a browser.
 
@@ -110,6 +117,11 @@ If an analysis is already running, the service answers 503 with a Retry-After he
 | NAKSHEAP_MAX_DEPTH | 8 | graph --max-depth |
 | NAKSHEAP_TIMEOUT | 1800 | Seconds before a stuck analysis is abandoned |
 | NAKSHEAP_PORT | 8080 | Listen port |
+| NAKSHEAP_API_TOKEN | (unset) | Bearer token for analyze, list, and download. If unset, those routes return 401. |
+| NAKSHEAP_UPLOAD_DIR | `$TMPDIR/naksheap-uploads` | Scratch directory for raw dumps, outside the served tree |
+| NAKSHEAP_RETENTION_HOURS | 24 | Delete reports older than this; pruning also runs on a timer and at startup |
+| NAKSHEAP_PRUNE_INTERVAL | 300 | Seconds between background prunes |
+| NAKSHEAP_SOCKET_TIMEOUT | 300 | Idle socket timeout in seconds |
 
 ## Production setups
 
@@ -141,13 +153,13 @@ Reports are pruned past NAKSHEAP_MAX_REPORTS. Point the artifact volume at your 
 
 - The analyzer makes no outbound connections. For hard isolation, put a NetworkPolicy or proxy in front that blocks egress.
 - Set NAKSHEAP_MAX_UPLOAD_BYTES and mirror it in the reverse proxy.
-- Use TLS in front and do not expose the upload endpoint without auth if the dumps are sensitive.
+- Set NAKSHEAP_API_TOKEN and send it as `Authorization: Bearer`. Unauthenticated list, download, and upload are rejected. Still use TLS in front.
 - Run as a non-root user with a read-only filesystem.
 - Keep the artifact volume private. Reports contain raw memory-derived data.
 - Run scripts/real-dump-test.sh once in your target environment, because the allocator parser is tied to the glibc version of the machines you capture dumps from.
 
 ## Non-goals
 
-- No built-in authentication, rate limiting, or multi-tenant isolation. Put those in the reverse proxy.
+- Built-in authentication is a single shared bearer token, not multi-tenant isolation or per-user accounts. Put rate limiting in the reverse proxy.
 - No incremental upload and analyze. A large dump is processed in one job.
 - No support for macOS cores, 32-bit dumps, jemalloc, or tcmalloc.
