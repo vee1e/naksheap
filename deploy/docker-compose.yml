@@ -10,6 +10,7 @@ services:
       NAKSHEAP_ARTIFACTS: /data
       NAKSHEAP_MAX_UPLOAD_BYTES: "10737418240" # 10 GiB
       NAKSHEAP_MAX_REPORTS: "1000"
+      NAKSHEAP_UPLOAD_DIR: /data/.uploads
       # Set NAKSHEAP_API_TOKEN (or pass it via an env file). Without it the
       # container stays healthy on /health, but analyze/list/download return 401.
       # NAKSHEAP_API_TOKEN: "replace-me"

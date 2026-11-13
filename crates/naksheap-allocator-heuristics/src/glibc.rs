@@ -583,6 +583,33 @@ fn first_heap_chunk_indices(objects: &[Object]) -> HashSet<usize> {
     firsts
 }
 
+/// A non-first 0x280 object is treated as tcache only when its entries look
+/// like real free-list heads: at least two bins have a non-zero count whose
+/// head pointer resolves to a carved object, and no claimed head is stale.
+/// A single planted pointer in a lookalike object is not enough.
+fn plausible_secondary_tcache(
+    image: &dyn AddressSpace,
+    obj: &Object,
+    by_addr: &HashMap<u64, usize>,
+) -> bool {
+    let mut valid = 0usize;
+    let mut invalid = 0usize;
+    for i in 0..64u64 {
+        let Some(count) = image.read_u16(obj.addr.saturating_add(i * 2)) else {
+            return false;
+        };
+        if count == 0 {
+            continue;
+        }
+        let slot = obj.addr.saturating_add(0x80 + i * 8);
+        match image.read_u64(slot) {
+            Some(cur) if cur != 0 && by_addr.contains_key(&cur) => valid += 1,
+            _ => invalid += 1,
+        }
+    }
+    invalid == 0 && valid >= 2
+}
+
 /// Marks chunks freed into glibc's per-thread tcache as [`Freed`].
 ///
 /// tcache'd chunks do NOT clear the successor's `PREV_INUSE` bit (that only
@@ -618,7 +645,12 @@ fn mark_tcache_freed(image: &dyn AddressSpace, objects: &mut [Object]) {
         if obj.state != ObjectState::Allocated || obj.size != 0x280 {
             continue;
         }
-        if !tcache_candidates.contains(&obj_i) {
+        // First chunk of a heap run is the usual place glibc puts the
+        // per-thread tcache. Threads that attach to an existing arena
+        // allocate theirs later; accept those only when at least two
+        // size-class heads resolve to carved objects and none fail.
+        if !tcache_candidates.contains(&obj_i) && !plausible_secondary_tcache(image, obj, &by_addr)
+        {
             continue;
         }
         // tcache_perthread_struct: u16 counts[64] at +0, entries[64] at +0x80.
@@ -1517,6 +1549,54 @@ mod tests {
             ObjectState::Allocated,
             "a later 0x280 object must not be used as tcache"
         );
+    }
+
+    #[test]
+    fn secondary_tcache_in_the_middle_of_a_heap_is_still_found() {
+        // A tcache allocated after the first chunk (a second thread attaching
+        // to an existing arena) must still mark its freed chunks. Two valid
+        // entry heads distinguish it from a lookalike with one planted pointer.
+        const L: u64 = 0x7faa_0000_0000;
+        let mut b = ImageBuilder::new();
+        add_libc(&mut b, L, 0x1000);
+        add_heap(&mut b, H, H_END - H);
+
+        let arena = L + 0x100;
+        let first = H;
+        let tcache = H + 0x30;
+        let freed_a_hdr = tcache + 0x290;
+        let freed_a = freed_a_hdr + 0x10;
+        let freed_b_hdr = freed_a_hdr + 0x20;
+        let freed_b = freed_b_hdr + 0x10;
+        let top = freed_b_hdr + 0x20;
+        b.write_u64(arena + ARENA_TOP_OFFSET, top);
+        b.write_u64(arena + ARENA_NEXT_OFFSET, arena);
+        b.write_u64(arena + ARENA_SYSTEM_MEM_OFFSET, H_END - H);
+
+        place_chunk(&mut b, first, 0x20, PREV_INUSE, 0);
+        place_chunk(&mut b, tcache, 0x280, PREV_INUSE, 0);
+        // counts[0] = 1, counts[1] = 1 (two u16s in the first word).
+        b.write_u64(tcache + 0x10, 1 | (1u64 << 16));
+        b.write_u64(tcache + 0x10 + 0x80, freed_a);
+        b.write_u64(tcache + 0x10 + 0x88, freed_b);
+        place_chunk(&mut b, freed_a_hdr, 0x10, PREV_INUSE, 0xAA);
+        place_chunk(&mut b, freed_b_hdr, 0x10, PREV_INUSE, 0xBB);
+        place_top(&mut b, top, H_END);
+
+        let img = b.build();
+        let inv = crate::carve(&img);
+        for &addr in &[freed_a, freed_b] {
+            let o = inv
+                .objects
+                .iter()
+                .find(|o| o.addr == addr)
+                .unwrap_or_else(|| panic!("chunk 0x{addr:x} carved"));
+            assert_eq!(
+                o.state,
+                ObjectState::Freed,
+                "secondary tcache must mark 0x{addr:x} freed"
+            );
+        }
     }
 
     #[test]

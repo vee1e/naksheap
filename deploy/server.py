@@ -50,13 +50,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BIN = os.environ.get("NAKSHEAP_BIN", "naksheap")
 ARTIFACTS = os.environ.get("NAKSHEAP_ARTIFACTS", "./data")
+# Default to a hidden directory beside the reports, on the same disk volume,
+# so a 10 GiB upload cannot OOM a tmpfs-backed /tmp (compose gives the
+# container 4 GiB of RAM and mounts /tmp as tmpfs). The index and prune
+# paths only consider 32-hex report ids, so `.uploads` is never served.
 UPLOAD_DIR = os.environ.get(
     "NAKSHEAP_UPLOAD_DIR",
-    os.path.join(tempfile.gettempdir(), "naksheap-uploads"),
+    os.path.join(ARTIFACTS, ".uploads"),
 )
 # Fail closed when unset: listing, download, and upload all return 401.
-# Compared as UTF-8 bytes with hmac.compare_digest; never logged.
-API_TOKEN = os.environ.get("NAKSHEAP_API_TOKEN", "").encode("utf-8")
+# Compared as UTF-8 bytes with hmac.compare_digest; never logged. Strip so a
+# secret file with a trailing newline still matches.
+API_TOKEN = os.environ.get("NAKSHEAP_API_TOKEN", "").strip().encode("utf-8")
 MAX_UPLOAD = int(os.environ.get("NAKSHEAP_MAX_UPLOAD_BYTES", str(10 * 1024**3)))
 MAX_REPORTS = int(os.environ.get("NAKSHEAP_MAX_REPORTS", "1000"))
 MAX_DEPTH = os.environ.get("NAKSHEAP_MAX_DEPTH", "8")
@@ -109,11 +114,10 @@ def _bearer_ok(header: str | None) -> bool:
     if not _token_configured():
         return False
     header = header or ""
-    prefix = "Bearer "
-    if not header.startswith(prefix):
-        got = b""
+    if header[:7].lower() == "bearer ":
+        got = header[7:].strip().encode("utf-8")
     else:
-        got = header[len(prefix):].encode("utf-8")
+        got = b""
     expected = API_TOKEN
     if len(got) != len(expected):
         # Dummy compare so a length mismatch still does a digest. The
@@ -156,7 +160,11 @@ def _prune():
     with _prune_lock:
         try:
             entries = sorted(
-                (p for p in os.listdir(ARTIFACTS) if os.path.isdir(os.path.join(ARTIFACTS, p))),
+                (
+                    p for p in os.listdir(ARTIFACTS)
+                    if re.fullmatch(r"[0-9a-f]{32}", p)
+                    and os.path.isdir(os.path.join(ARTIFACTS, p))
+                ),
                 key=lambda p: os.path.getmtime(os.path.join(ARTIFACTS, p)),
             )
         except OSError:
@@ -174,6 +182,31 @@ def _prune():
                         log.info("pruned report %s (older than %sh)", p, RETENTION_HOURS)
                 except OSError:
                     pass
+    _prune_uploads()
+
+
+def _prune_uploads():
+    """Delete leftover raw cores in UPLOAD_DIR.
+
+    In-flight uploads are skipped by leaving files newer than the analysis
+    plus socket timeout alone. A process crash mid-upload would otherwise
+    leave a credential-bearing dump on disk forever.
+    """
+    cutoff = time.time() - max(ANALYSIS_TIMEOUT, SOCKET_TIMEOUT) - 60
+    try:
+        names = os.listdir(UPLOAD_DIR)
+    except OSError:
+        return
+    for name in names:
+        if not name.endswith(".core"):
+            continue
+        path = os.path.join(UPLOAD_DIR, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                _unlink(path)
+                log.info("pruned leftover upload %s", name)
+        except OSError:
+            pass
 
 
 def _prune_loop():
@@ -219,16 +252,27 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def _json(self, code, obj):
+    def _json(self, code, obj, close=False):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self._cors()
         if code in (401, 403):
             self.send_header("WWW-Authenticate", 'Bearer realm="naksheap"')
+        if close:
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def handle_expect_100(self):
+        # Do not tell the client to stream a multi-gigabyte body if the
+        # request is already going to be rejected for a missing token.
+        if self.command == "PUT" and not _bearer_ok(self.headers.get("Authorization")):
+            self._require_auth()
+            return False
+        return super().handle_expect_100()
 
     def _require_auth(self) -> bool:
         if _bearer_ok(self.headers.get("Authorization")):
@@ -238,9 +282,9 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": False,
                 "error": "NAKSHEAP_API_TOKEN is not configured; listing, "
                          "download, and upload are disabled",
-            })
+            }, close=True)
         else:
-            self._json(401, {"ok": False, "error": "unauthorized"})
+            self._json(401, {"ok": False, "error": "unauthorized"}, close=True)
         return False
 
     def _file(self, path, ctype="application/octet-stream"):
@@ -263,18 +307,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._require_auth():
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._json(400, {"ok": False, "error": "invalid Content-Length"}, close=True)
+            return
         if length <= 0 or length > MAX_UPLOAD:
-            self._json(413, {"ok": False, "error": "upload too large"})
+            self._json(413, {"ok": False, "error": "upload too large"}, close=True)
             return
         # Take the slot before any disk write so a second upload cannot land
         # a multi-gigabyte body while an analysis is already running.
         if not _try_acquire_busy(0.5):
             log.warning("busy, rejecting upload with 503")
+            self.close_connection = True
             body = b'{"ok":false,"error":"an analysis is already running, retry shortly"}'
             self.send_response(503)
             self._cors()
             self.send_header("Retry-After", "30")
+            self.send_header("Connection", "close")
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -341,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
                 with open(graph_path, encoding="utf-8") as fh:
                     g = json.load(fh)
                 summary["stats"] = g.get("stats", {})
-            except OSError:
+            except (OSError, json.JSONDecodeError, AttributeError, TypeError):
                 pass
             summary["report"] = f"/reports/{rid}/report.html"
             summary["json"] = f"/reports/{rid}/graph.json"

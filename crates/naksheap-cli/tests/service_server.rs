@@ -18,7 +18,9 @@ fn workspace_root() -> PathBuf {
 fn deploy_server_python_tests() {
     let root = workspace_root();
     let status = Command::new("python3")
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .args([
+            "-B",
             "-m",
             "unittest",
             "discover",

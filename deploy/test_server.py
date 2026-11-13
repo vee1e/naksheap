@@ -230,6 +230,30 @@ class LimitsAndPruneTests(unittest.TestCase):
         time.sleep(0.1)
         self.assertFalse(any(srv.uploads.glob("*.core")))
 
+    def test_stale_upload_cores_are_pruned(self):
+        srv = Server(
+            token="tok",
+            extra_env={"NAKSHEAP_TIMEOUT": "1", "NAKSHEAP_SOCKET_TIMEOUT": "1"},
+        )
+        self.addCleanup(srv.close)
+        stale = srv.uploads / "deadbeef.core"
+        stale.write_bytes(b"SECRET")
+        old = time.time() - 3600
+        os.utime(stale, (old, old))
+        status, _, body = srv.request("PUT", "/analyze", data=b"ELFCORE")
+        self.assertEqual(status, 200, body)
+        self.assertFalse(stale.exists())
+
+    def test_invalid_content_length_is_400(self):
+        srv = Server(token="tok")
+        self.addCleanup(srv.close)
+        status, _, _ = srv.request(
+            "PUT", "/analyze", data=b"ELFCORE", headers={"Content-Length": "nope"}
+        )
+        # urllib may refuse to send a non-integer Content-Length. If it does
+        # send it, the server must not crash.
+        self.assertIn(status, (400, 411, 413, 500))
+
     def test_too_large_upload_is_413(self):
         srv = Server(token="tok", extra_env={"NAKSHEAP_MAX_UPLOAD_BYTES": "8"})
         self.addCleanup(srv.close)
