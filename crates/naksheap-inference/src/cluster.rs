@@ -23,6 +23,12 @@ const POINTER_THRESHOLD: f64 = 0.5;
 const STRING_THRESHOLD: f64 = 0.5;
 /// Minimum run length of printable bytes for a word to read as a string.
 const STRING_RUN: u32 = 4;
+/// Only the first 4 KiB of an object is clustered. A 1 GiB mmap allocation
+/// would otherwise allocate several gigabytes of per-word masks.
+const MAX_CLUSTER_WORDS: usize = 4096 / 8;
+/// Mmap allocations larger than this are skipped entirely: they are usually
+/// bulk buffers, not typable structs, and their masks would dominate memory.
+const MAX_MMAP_CLUSTER_SIZE: u64 = 64 * 1024;
 /// A string needs at least two distinct byte values, so constant fill patterns
 /// ('AAAAAAAA') are padding, not text.
 const STRING_MIN_DISTINCT: u32 = 2;
@@ -73,8 +79,16 @@ pub fn cluster_objects(
 ) -> Vec<LayoutCluster> {
     let eligible: Vec<&Object> = objects
         .iter()
-        .filter(|o| matches!(o.state, ObjectState::Allocated | ObjectState::Mmap))
+        .filter(|o| match o.state {
+            ObjectState::Allocated => true,
+            ObjectState::Mmap => o.size <= MAX_MMAP_CLUSTER_SIZE,
+            _ => false,
+        })
         .collect();
+
+    // Built once, not once per size class: the previous loop rebuilt this
+    // map over every object for every distinct size, which is quadratic.
+    let addr_to_obj: HashMap<u64, &Object> = objects.iter().map(|o| (o.addr, o)).collect();
 
     let mut ranges: Vec<(u64, u64)> = eligible.iter().map(|o| (o.addr, o.size)).collect();
     ranges.sort_by_key(|&(a, _)| a);
@@ -119,10 +133,6 @@ pub fn cluster_objects(
         for (m, mask) in deviants {
             dev_by_mask.entry(mask).or_default().push(m.addr);
         }
-        let addr_to_obj: HashMap<u64, &Object> = objects
-            .iter()
-            .map(|o| (o.addr, o))
-            .collect();
         for (_, addrs) in dev_by_mask {
             let sub_members: Vec<&Object> = addrs
                 .iter()
@@ -150,7 +160,7 @@ fn majority_masks(
     targets: &TargetIndex,
 ) -> (Vec<bool>, Vec<bool>) {
     let n = members.len().max(1);
-    let n_words = size.div_ceil(8) as usize;
+    let n_words = (size.div_ceil(8) as usize).min(MAX_CLUSTER_WORDS);
     let mut ptr_cnt = vec![0usize; n_words];
     let mut str_cnt = vec![0usize; n_words];
     let mut zero_cnt = vec![0usize; n_words];
@@ -191,7 +201,7 @@ fn individual_masks(
     obj: &Object,
     targets: &TargetIndex,
 ) -> (Vec<bool>, Vec<bool>) {
-    let n_words = obj.size.div_ceil(8) as usize;
+    let n_words = (obj.size.div_ceil(8) as usize).min(MAX_CLUSTER_WORDS);
     let mut ptr = vec![false; n_words];
     let mut s = vec![false; n_words];
     for i in 0..n_words {
@@ -331,9 +341,7 @@ fn is_ascii_text(b: u8) -> bool {
 
 /// Printable ASCII, control-whitespace, and UTF-8 continuation bytes.
 pub(crate) fn is_printable(b: u8) -> bool {
-    (0x20..=0x7e).contains(&b)
-        || matches!(b, 0x09 | 0x0a | 0x0d)
-        || (0x80..=0xbf).contains(&b)
+    (0x20..=0x7e).contains(&b) || matches!(b, 0x09 | 0x0a | 0x0d) || (0x80..=0xbf).contains(&b)
 }
 
 #[cfg(test)]
@@ -427,7 +435,11 @@ mod tests {
 
         let clusters = cluster_objects(&image, &objects, &[]);
         let sizes: Vec<u64> = clusters.iter().map(|cl| cl.size).collect();
-        assert_eq!(clusters.len(), 2, "expected one cluster per size, got {sizes:?}");
+        assert_eq!(
+            clusters.len(),
+            2,
+            "expected one cluster per size, got {sizes:?}"
+        );
         assert!(sizes.contains(&0x20));
         assert!(sizes.contains(&0x30));
     }
